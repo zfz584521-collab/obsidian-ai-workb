@@ -1,0 +1,10 @@
+{
+  "id": "ai-workbench",
+  "name": "AI Workbench",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "AI-powered workbench for current note: summarize, outline, translate, and more with one click.",
+  "author": "Your Name",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
