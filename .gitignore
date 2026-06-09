@@ -1,6 +1,47 @@
+# Dependencies
 node_modules/
+
+# OS files
 .DS_Store
-*.log
+Thumbs.db
+
+# IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.json
+data.json
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Obsidian plugin data
+.obsidian/
+data.json
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Test coverage
+coverage/
+.nyc_output/
 
