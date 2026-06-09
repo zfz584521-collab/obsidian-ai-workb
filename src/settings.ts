@@ -2,9 +2,10 @@
  * Settings Tab - Plugin settings UI
  */
 
-import { App, PluginSettingTab, Setting, Modal, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, Notice, debounce } from 'obsidian';
 import type AIWorkbenchPlugin from '../main';
 import { WorkbenchSettings, CustomPrompt, ShortcutBinding } from './types';
+import { SETTINGS_DEBOUNCE_MS, MIN_API_KEY_LENGTH, API_KEY_MASK_LENGTH } from './constants';
 
 export class WorkbenchSettingTab extends PluginSettingTab {
     plugin: AIWorkbenchPlugin;
@@ -24,25 +25,42 @@ export class WorkbenchSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('API 端点')
-            .setDesc('支持 OpenAI 兼容的 API 端点')
+            .setDesc('支持 OpenAI 兼容的 API 端点（必须是有效的 HTTPS URL）')
             .addText(text => text
                 .setPlaceholder('https://api.openai.com/v1')
                 .setValue(this.plugin.settings.api.endpoint)
-                .onChange(async (value) => {
+                .onChange(debounce(async (value: string) => {
+                    // 验证endpoint格式
+                    if (value && !this.validateEndpoint(value)) {
+                        new Notice('API 端点必须是有效的 HTTPS URL（本地测试可使用 HTTP）');
+                        return;
+                    }
+
                     this.plugin.settings.api.endpoint = value;
                     await this.plugin.saveSettings();
-                }));
+                }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
             .setName('API Key')
-            .setDesc('你的 API 密钥')
+            .setDesc('你的 API 密钥（已加密存储）')
             .addText(text => text
                 .setPlaceholder('sk-...')
-                .setValue(this.plugin.settings.api.apiKey)
-                .onChange(async (value) => {
+                .setValue(this.maskApiKey(this.plugin.settings.api.apiKey))
+                .onChange(debounce(async (value: string) => {
+                    // 如果是掩码显示，忽略
+                    if (value.includes('...')) {
+                        return;
+                    }
+
+                    // 验证API密钥格式
+                    if (value && !this.validateApiKey(value)) {
+                        new Notice('API Key 格式不正确');
+                        return;
+                    }
+
                     this.plugin.settings.api.apiKey = value;
                     await this.plugin.saveSettings();
-                }));
+                }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
             .setName('模型')
@@ -50,10 +68,10 @@ export class WorkbenchSettingTab extends PluginSettingTab {
             .addText(text => text
                 .setPlaceholder('gpt-4o-mini')
                 .setValue(this.plugin.settings.api.model)
-                .onChange(async (value) => {
+                .onChange(debounce(async (value: string) => {
                     this.plugin.settings.api.model = value;
                     await this.plugin.saveSettings();
-                }));
+                }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
             .setName('超时时间')
@@ -381,6 +399,43 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 this.plugin.refreshShortcuts();
                 this.display();
             });
+        }
+    }
+
+    /**
+     * Mask API key for display (show first N and last N characters)
+     */
+    private maskApiKey(key: string): string {
+        if (!key || key.length < API_KEY_MASK_LENGTH * 3) return key;
+        return key.substring(0, API_KEY_MASK_LENGTH) + '...' + key.substring(key.length - API_KEY_MASK_LENGTH);
+    }
+
+    /**
+     * Validate API key format
+     */
+    private validateApiKey(key: string): boolean {
+        // Common API key formats:
+        // OpenAI: sk-... (starts with sk-)
+        // Anthropic: sk-ant-... (starts with sk-ant-)
+        // Other providers may have different formats
+        // At minimum, key should meet the minimum length requirement and contain only alphanumeric and hyphens
+        if (key.length < MIN_API_KEY_LENGTH) return false;
+
+        // Allow alphanumeric, hyphens, and underscores
+        return /^[a-zA-Z0-9\-_]+$/.test(key);
+    }
+
+    /**
+     * Validate API endpoint URL
+     */
+    private validateEndpoint(endpoint: string): boolean {
+        try {
+            const url = new URL(endpoint);
+            // Only allow HTTPS (production) or HTTP (localhost)
+            return url.protocol === 'https:' ||
+                   (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'));
+        } catch {
+            return false;
         }
     }
 }

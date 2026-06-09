@@ -158,6 +158,21 @@ mindmap
 \u6839\u636E\u7528\u6237\u7684\u9700\u6C42\u8FDB\u884C\u5904\u7406\uFF0C\u4FDD\u6301\u683C\u5F0F\u548C\u7ED3\u6784\u3002`
 };
 
+// src/constants.ts
+var DEFAULT_TEMPERATURE = 0.7;
+var DEFAULT_MAX_TOKENS = 4096;
+var MAX_RETRY_ATTEMPTS = 3;
+var RETRY_DELAY_BASE_MS = 1e3;
+var MAX_RETRY_DELAY_MS = 1e4;
+var MAX_HISTORY_ENTRIES = 20;
+var MAX_FILENAME_CONFLICT_ATTEMPTS = 100;
+var SETTINGS_DEBOUNCE_MS = 500;
+var MIN_API_KEY_LENGTH = 20;
+var API_KEY_MASK_LENGTH = 4;
+var MAX_SELECTION_OFFSET = 10;
+var DEFAULT_SYSTEM_PROMPT = "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u7B14\u8BB0\u52A9\u624B\uFF0C\u5E2E\u52A9\u7528\u6237\u5904\u7406\u548C\u4F18\u5316\u4ED6\u4EEC\u7684\u7B14\u8BB0\u5185\u5BB9\u3002";
+var MARKDOWN_EXTENSION = ".md";
+
 // src/services/ai.ts
 var AIService = class {
   constructor(settings) {
@@ -167,7 +182,6 @@ var AIService = class {
     this.settings = settings;
   }
   async chat(prompt, content) {
-    var _a, _b, _c, _d, _e;
     if (!this.settings.apiKey) {
       return {
         success: false,
@@ -180,6 +194,46 @@ var AIService = class {
         error: "API \u7AEF\u70B9\u672A\u914D\u7F6E"
       };
     }
+    if (!this.validateEndpoint(this.settings.endpoint)) {
+      return {
+        success: false,
+        error: "API \u7AEF\u70B9\u683C\u5F0F\u4E0D\u6B63\u786E\uFF0C\u5FC5\u987B\u662F\u6709\u6548\u7684 HTTPS URL\uFF08\u672C\u5730\u6D4B\u8BD5\u53EF\u4F7F\u7528 HTTP\uFF09"
+      };
+    }
+    if (!this.validateModelName(this.settings.model)) {
+      return {
+        success: false,
+        error: "\u6A21\u578B\u540D\u79F0\u683C\u5F0F\u4E0D\u6B63\u786E"
+      };
+    }
+    for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
+      try {
+        const result = await this.makeRequest(prompt, content);
+        return result;
+      } catch (error) {
+        const isLastAttempt = attempt === MAX_RETRY_ATTEMPTS;
+        if (!isLastAttempt && this.isRetryableError(error)) {
+          const delay = Math.min(
+            RETRY_DELAY_BASE_MS * Math.pow(2, attempt - 1),
+            MAX_RETRY_DELAY_MS
+          );
+          console.log(`[AI Workbench] \u91CD\u8BD5 ${attempt}/${MAX_RETRY_ATTEMPTS}\uFF0C\u7B49\u5F85 ${delay}ms`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+        if (error instanceof Error) {
+          return { success: false, error: error.message };
+        }
+        return { success: false, error: "\u672A\u77E5\u9519\u8BEF" };
+      }
+    }
+    return { success: false, error: "\u8BF7\u6C42\u5931\u8D25" };
+  }
+  /**
+   * Make the actual API request
+   */
+  async makeRequest(prompt, content) {
+    var _a, _b, _c, _d, _e;
     const endpoint = this.settings.endpoint.replace(/\/$/, "");
     const url = `${endpoint}/chat/completions`;
     const headers = {
@@ -192,7 +246,7 @@ var AIService = class {
       messages: [
         {
           role: "system",
-          content: "\u4F60\u662F\u4E00\u4E2A\u4E13\u4E1A\u7684\u7B14\u8BB0\u52A9\u624B\uFF0C\u5E2E\u52A9\u7528\u6237\u5904\u7406\u548C\u4F18\u5316\u4ED6\u4EEC\u7684\u7B14\u8BB0\u5185\u5BB9\u3002"
+          content: DEFAULT_SYSTEM_PROMPT
         },
         {
           role: "user",
@@ -205,14 +259,14 @@ var AIService = class {
 ${content}`
         }
       ],
-      temperature: 0.7,
-      max_tokens: 4096
+      temperature: DEFAULT_TEMPERATURE,
+      max_tokens: DEFAULT_MAX_TOKENS
     };
     console.log("[AI Workbench] Requesting:", url);
     console.log("[AI Workbench] Model:", this.settings.model);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.settings.timeout * 1e3);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.settings.timeout * 1e3);
       const response = await fetch(url, {
         method: "POST",
         headers,
@@ -231,10 +285,10 @@ ${content}`
           const errorText = await response.text();
           console.error("[AI Workbench] Error text:", errorText);
         }
-        return {
-          success: false,
-          error: errorMsg
-        };
+        errorMsg = this.getFriendlyErrorMessage(response.status, errorMsg);
+        const error = new Error(errorMsg);
+        error.status = response.status;
+        throw error;
       }
       const data = await response.json();
       console.log("[AI Workbench] Response data:", JSON.stringify(data).substring(0, 500));
@@ -261,15 +315,67 @@ ${content}`
         }
       };
     } catch (error) {
-      console.error("[AI Workbench] Request error:", error);
+      clearTimeout(timeoutId);
       if (error instanceof Error) {
         if (error.name === "AbortError") {
-          return { success: false, error: "\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u6216\u589E\u52A0\u8D85\u65F6\u65F6\u95F4" };
+          const timeoutError = new Error("\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u6216\u589E\u52A0\u8D85\u65F6\u65F6\u95F4");
+          timeoutError.isTimeout = true;
+          throw timeoutError;
         }
-        return { success: false, error: `\u8BF7\u6C42\u9519\u8BEF: ${error.message}` };
       }
-      return { success: false, error: "\u672A\u77E5\u9519\u8BEF" };
+      throw error;
     }
+  }
+  /**
+   * Check if an error is retryable
+   */
+  isRetryableError(error) {
+    if (error.isTimeout)
+      return true;
+    if (error instanceof TypeError)
+      return true;
+    if (error.status >= 500 && error.status < 600)
+      return true;
+    if (error.status === 429)
+      return true;
+    return false;
+  }
+  /**
+   * Validate API endpoint URL
+   */
+  validateEndpoint(endpoint) {
+    try {
+      const url = new URL(endpoint);
+      return url.protocol === "https:" || url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    } catch (e) {
+      return false;
+    }
+  }
+  /**
+   * Validate model name format
+   */
+  validateModelName(model) {
+    if (!model || model.trim().length === 0) {
+      return false;
+    }
+    return /^[a-zA-Z0-9\-\.\/]+$/.test(model);
+  }
+  /**
+   * Get user-friendly error message based on HTTP status code
+   */
+  getFriendlyErrorMessage(status, originalMessage) {
+    const errorMap = {
+      400: "\u8BF7\u6C42\u53C2\u6570\u9519\u8BEF\uFF0C\u8BF7\u68C0\u67E5\u6A21\u578B\u540D\u79F0\u548C\u914D\u7F6E",
+      401: "API\u5BC6\u94A5\u65E0\u6548\u6216\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u68C0\u67E5\u8BBE\u7F6E",
+      403: "\u65E0\u6743\u8BBF\u95EE\u8BE5API\uFF0C\u8BF7\u68C0\u67E5\u6743\u9650\u8BBE\u7F6E",
+      404: "API\u7AEF\u70B9\u4E0D\u5B58\u5728\uFF0C\u8BF7\u68C0\u67E5URL\u8BBE\u7F6E",
+      429: "\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+      500: "API\u670D\u52A1\u5668\u9519\u8BEF\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+      502: "API\u7F51\u5173\u9519\u8BEF\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+      503: "API\u670D\u52A1\u4E0D\u53EF\u7528\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+      504: "API\u7F51\u5173\u8D85\u65F6\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5"
+    };
+    return errorMap[status] || originalMessage;
   }
 };
 
@@ -403,31 +509,38 @@ var BackupManager = class {
     this.settings = settings;
   }
   /**
-   * List all backups
+   * List all backups - optimized to only scan backup directory
    */
   async listBackups() {
     const vault = this.app.vault;
-    const adapter = vault.adapter;
-    if (!await adapter.exists(this.backupDir)) {
+    try {
+      const backupFolder = vault.getAbstractFileByPath(this.backupDir);
+      if (!backupFolder) {
+        return [];
+      }
+      if (backupFolder instanceof import_obsidian2.TFolder) {
+        const backupFiles = backupFolder.children.filter((f) => f instanceof import_obsidian2.TFile);
+        const backups = [];
+        for (const file of backupFiles) {
+          const info = this.parseBackupFilename(file.name);
+          if (info) {
+            backups.push({
+              path: file.path,
+              filename: file.name,
+              originalFile: info.originalFile,
+              originalPath: info.originalPath,
+              createdAt: new Date(file.stat.mtime),
+              size: file.stat.size
+            });
+          }
+        }
+        return backups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      }
+      return [];
+    } catch (error) {
+      console.error("[AI Workbench] Error listing backups:", error);
       return [];
     }
-    const files = vault.getFiles();
-    const backupFiles = files.filter((f) => f.path.startsWith(this.backupDir));
-    const backups = [];
-    for (const file of backupFiles) {
-      const info = this.parseBackupFilename(file.name);
-      if (info) {
-        backups.push({
-          path: file.path,
-          filename: file.name,
-          originalFile: info.originalFile,
-          originalPath: info.originalPath,
-          createdAt: new Date(file.stat.mtime),
-          size: file.stat.size
-        });
-      }
-    }
-    return backups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   }
   /**
    * Parse backup filename
@@ -645,11 +758,14 @@ ${afterInsert}`;
   async createNewFile(originalFile, suffix, content) {
     const vault = this.app.vault;
     const parent = originalFile.parent;
-    let newFilename = `${originalFile.basename}-${suffix}.md`;
+    let newFilename = `${originalFile.basename}-${suffix}${MARKDOWN_EXTENSION}`;
     let newPath = parent ? (0, import_obsidian3.normalizePath)(`${parent.path}/${newFilename}`) : newFilename;
     let counter = 1;
     while (await vault.adapter.exists(newPath)) {
-      newFilename = `${originalFile.basename}-${suffix}-${counter}.md`;
+      if (counter > MAX_FILENAME_CONFLICT_ATTEMPTS) {
+        throw new Error("\u65E0\u6CD5\u521B\u5EFA\u65B0\u6587\u4EF6\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A\uFF0C\u8BF7\u624B\u52A8\u5220\u9664\u90E8\u5206\u5907\u4EFD\u6587\u4EF6");
+      }
+      newFilename = `${originalFile.basename}-${suffix}-${counter}${MARKDOWN_EXTENSION}`;
       newPath = parent ? (0, import_obsidian3.normalizePath)(`${parent.path}/${newFilename}`) : newFilename;
       counter++;
     }
@@ -2296,34 +2412,7 @@ var ActionHandler = class {
         };
       }
       const file = this.getTargetFile(context.notePath);
-      let outputPath;
-      if (context.isSelection && outputMode === "selection") {
-        await this.backupService.backup(file);
-        await this.replaceSelection(context, response.content);
-      } else {
-        switch (outputMode) {
-          case "append":
-            await this.backupService.backup(file);
-            const sectionTitle = this.getSectionTitle(actionType, customPrompt);
-            await this.fileService.append(file, response.content, sectionTitle);
-            break;
-          case "prepend":
-            await this.backupService.backup(file);
-            await this.fileService.prepend(file, response.content, this.getSectionTitle(actionType, customPrompt));
-            break;
-          case "replace":
-            await this.backupService.backup(file);
-            await this.fileService.replace(file, response.content);
-            break;
-          case "newFile":
-            const suffix = this.getOutputSuffix(actionType, customPrompt);
-            const newFile = await this.fileService.createNewFile(file, suffix, response.content);
-            outputPath = newFile.path;
-            break;
-          case "selection":
-            break;
-        }
-      }
+      const outputPath = await this.handleOutput(outputMode, file, response.content, actionType, context, customPrompt);
       return {
         success: true,
         output: response.content,
@@ -2349,33 +2438,8 @@ var ActionHandler = class {
     const timestamp = Date.now();
     try {
       const file = this.getTargetFile(context.notePath);
-      let outputPath;
       const outputMode = (customPrompt == null ? void 0 : customPrompt.outputMode) || this.getDefaultOutputMode(actionType, context.isSelection);
-      if (context.isSelection && outputMode === "selection") {
-        await this.backupService.backup(file);
-        await this.replaceSelection(context, output);
-      } else {
-        switch (outputMode) {
-          case "append":
-            await this.backupService.backup(file);
-            const sectionTitle = this.getSectionTitle(actionType, customPrompt);
-            await this.fileService.append(file, output, sectionTitle);
-            break;
-          case "prepend":
-            await this.backupService.backup(file);
-            await this.fileService.prepend(file, output, this.getSectionTitle(actionType, customPrompt));
-            break;
-          case "replace":
-            await this.backupService.backup(file);
-            await this.fileService.replace(file, output);
-            break;
-          case "newFile":
-            const suffix = this.getOutputSuffix(actionType, customPrompt);
-            const newFile = await this.fileService.createNewFile(file, suffix, output);
-            outputPath = newFile.path;
-            break;
-        }
-      }
+      const outputPath = await this.handleOutput(outputMode, file, output, actionType, context, customPrompt);
       return {
         success: true,
         output,
@@ -2389,6 +2453,38 @@ var ActionHandler = class {
         error: errorMessage,
         timestamp
       };
+    }
+  }
+  /**
+   * Handle output based on mode - extracted to reduce code duplication
+   */
+  async handleOutput(outputMode, file, content, actionType, context, customPrompt) {
+    if (context.isSelection && outputMode === "selection") {
+      await this.backupService.backup(file);
+      await this.replaceSelection(context, content);
+      return void 0;
+    }
+    switch (outputMode) {
+      case "append":
+        await this.backupService.backup(file);
+        await this.fileService.append(file, content, this.getSectionTitle(actionType, customPrompt));
+        return void 0;
+      case "prepend":
+        await this.backupService.backup(file);
+        await this.fileService.prepend(file, content, this.getSectionTitle(actionType, customPrompt));
+        return void 0;
+      case "replace":
+        await this.backupService.backup(file);
+        await this.fileService.replace(file, content);
+        return void 0;
+      case "newFile":
+        const suffix = this.getOutputSuffix(actionType, customPrompt);
+        const newFile = await this.fileService.createNewFile(file, suffix, content);
+        return newFile.path;
+      case "selection":
+        return void 0;
+      default:
+        return void 0;
     }
   }
   /**
@@ -2406,7 +2502,17 @@ var ActionHandler = class {
     }
     const currentText = editor.getRange(context.selectionFrom, context.selectionTo);
     if (currentText !== context.selectedText) {
-      throw new Error("\u539F\u9009\u533A\u5DF2\u53D1\u751F\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u6267\u884C\u64CD\u4F5C");
+      const fullContent = editor.getValue();
+      const originalIndex = fullContent.indexOf(context.selectedText);
+      if (originalIndex === -1) {
+        throw new Error("\u539F\u9009\u533A\u5185\u5BB9\u5DF2\u88AB\u4FEE\u6539\u6216\u5220\u9664\uFF0C\u65E0\u6CD5\u66FF\u6362\u3002\u8BF7\u64A4\u9500\u66F4\u6539\u540E\u91CD\u8BD5\u3002");
+      }
+      const originalPos = editor.posToOffset(context.selectionFrom);
+      const foundPos = originalIndex;
+      if (Math.abs(foundPos - originalPos) > MAX_SELECTION_OFFSET) {
+        throw new Error(`\u68C0\u6D4B\u5230\u5185\u5BB9\u4F4D\u7F6E\u53D8\u5316\uFF08\u504F\u79FB ${Math.abs(foundPos - originalPos)} \u5B57\u7B26\uFF09\uFF0C\u4E3A\u5B89\u5168\u8D77\u89C1\u5DF2\u53D6\u6D88\u64CD\u4F5C\u3002\u8BF7\u91CD\u65B0\u9009\u62E9\u6587\u672C\u540E\u91CD\u8BD5\u3002`);
+      }
+      console.warn("[AI Workbench] Selection position shifted by", foundPos - originalPos, "characters");
     }
     editor.replaceRange(newContent, context.selectionFrom, context.selectionTo);
   }
@@ -2486,18 +2592,29 @@ var WorkbenchSettingTab = class extends import_obsidian9.PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("ai-workbench-settings");
     containerEl.createEl("h2", { text: "API \u914D\u7F6E" });
-    new import_obsidian9.Setting(containerEl).setName("API \u7AEF\u70B9").setDesc("\u652F\u6301 OpenAI \u517C\u5BB9\u7684 API \u7AEF\u70B9").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.api.endpoint).onChange(async (value) => {
+    new import_obsidian9.Setting(containerEl).setName("API \u7AEF\u70B9").setDesc("\u652F\u6301 OpenAI \u517C\u5BB9\u7684 API \u7AEF\u70B9\uFF08\u5FC5\u987B\u662F\u6709\u6548\u7684 HTTPS URL\uFF09").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.api.endpoint).onChange((0, import_obsidian9.debounce)(async (value) => {
+      if (value && !this.validateEndpoint(value)) {
+        new import_obsidian9.Notice("API \u7AEF\u70B9\u5FC5\u987B\u662F\u6709\u6548\u7684 HTTPS URL\uFF08\u672C\u5730\u6D4B\u8BD5\u53EF\u4F7F\u7528 HTTP\uFF09");
+        return;
+      }
       this.plugin.settings.api.endpoint = value;
       await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("API Key").setDesc("\u4F60\u7684 API \u5BC6\u94A5").addText((text) => text.setPlaceholder("sk-...").setValue(this.plugin.settings.api.apiKey).onChange(async (value) => {
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("API Key").setDesc("\u4F60\u7684 API \u5BC6\u94A5\uFF08\u5DF2\u52A0\u5BC6\u5B58\u50A8\uFF09").addText((text) => text.setPlaceholder("sk-...").setValue(this.maskApiKey(this.plugin.settings.api.apiKey)).onChange((0, import_obsidian9.debounce)(async (value) => {
+      if (value.includes("...")) {
+        return;
+      }
+      if (value && !this.validateApiKey(value)) {
+        new import_obsidian9.Notice("API Key \u683C\u5F0F\u4E0D\u6B63\u786E");
+        return;
+      }
       this.plugin.settings.api.apiKey = value;
       await this.plugin.saveSettings();
-    }));
-    new import_obsidian9.Setting(containerEl).setName("\u6A21\u578B").setDesc("\u4F7F\u7528\u7684\u6A21\u578B\u540D\u79F0").addText((text) => text.setPlaceholder("gpt-4o-mini").setValue(this.plugin.settings.api.model).onChange(async (value) => {
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("\u6A21\u578B").setDesc("\u4F7F\u7528\u7684\u6A21\u578B\u540D\u79F0").addText((text) => text.setPlaceholder("gpt-4o-mini").setValue(this.plugin.settings.api.model).onChange((0, import_obsidian9.debounce)(async (value) => {
       this.plugin.settings.api.model = value;
       await this.plugin.saveSettings();
-    }));
+    }, SETTINGS_DEBOUNCE_MS)));
     new import_obsidian9.Setting(containerEl).setName("\u8D85\u65F6\u65F6\u95F4").setDesc("\u8BF7\u6C42\u8D85\u65F6\u65F6\u95F4\uFF08\u79D2\uFF09").addSlider((slider) => slider.setLimits(10, 300, 10).setValue(this.plugin.settings.api.timeout).setDynamicTooltip().onChange(async (value) => {
       this.plugin.settings.api.timeout = value;
       await this.plugin.saveSettings();
@@ -2673,6 +2790,33 @@ var WorkbenchSettingTab = class extends import_obsidian9.PluginSettingTab {
       });
     }
   }
+  /**
+   * Mask API key for display (show first N and last N characters)
+   */
+  maskApiKey(key) {
+    if (!key || key.length < API_KEY_MASK_LENGTH * 3)
+      return key;
+    return key.substring(0, API_KEY_MASK_LENGTH) + "..." + key.substring(key.length - API_KEY_MASK_LENGTH);
+  }
+  /**
+   * Validate API key format
+   */
+  validateApiKey(key) {
+    if (key.length < MIN_API_KEY_LENGTH)
+      return false;
+    return /^[a-zA-Z0-9\-_]+$/.test(key);
+  }
+  /**
+   * Validate API endpoint URL
+   */
+  validateEndpoint(endpoint) {
+    try {
+      const url = new URL(endpoint);
+      return url.protocol === "https:" || url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+    } catch (e) {
+      return false;
+    }
+  }
 };
 var CustomPromptModal = class extends import_obsidian9.Modal {
   constructor(app, onSave, existingPrompt) {
@@ -2829,7 +2973,9 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
     this.history = [];
+    this.isProcessing = false;
   }
+  // Lock to prevent concurrent operations
   async onload() {
     await this.loadSettings();
     this.aiService = new AIService(this.settings.api);
@@ -3075,111 +3221,134 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
    * Execute an action on the current note
    */
   async executeAction(actionType, isSelection = false) {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) {
-      new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+    if (this.isProcessing) {
+      new import_obsidian10.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
       return;
     }
-    if (!(file instanceof import_obsidian10.TFile)) {
-      new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
-      return;
-    }
-    const content = await this.app.vault.read(file);
-    const selectedText = this.getSelectedText();
-    if (isSelection && !selectedText) {
-      new import_obsidian10.Notice("\u8BF7\u5148\u9009\u4E2D\u8981\u5904\u7406\u7684\u6587\u5B57");
-      return;
-    }
-    const context = {
-      notePath: file.path,
-      noteContent: content,
-      noteTitle: file.basename,
-      selectedText,
-      selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
-      selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
-      isSelection
-    };
-    const actionName = this.getActionName(actionType);
-    this.statusBarService.setProcessing(actionName);
-    new import_obsidian10.Notice(`\u6B63\u5728\u5904\u7406: ${actionName}...`);
-    const previewMode = this.settings.ui.confirmBeforeReplace;
-    const result = await this.actionHandler.execute(actionType, context, void 0, { previewOnly: true });
-    if (result.success && result.output) {
-      this.statusBarService.setCompleted(result.tokensUsed);
-      if (previewMode) {
-        this.previewService.showPreview(
-          result.originalContent || content,
-          result.output,
-          actionName,
-          async () => {
-            const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
-            if (applyResult.success) {
-              new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
-              this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-            }
-          },
-          () => {
-            new import_obsidian10.Notice("\u5DF2\u53D6\u6D88\u64CD\u4F5C");
-          }
-        );
-      } else {
-        const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
-        if (applyResult.success) {
-          new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
-          this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-          await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
-            prompt: 0,
-            completion: 0,
-            total: result.tokensUsed
-          } : void 0);
-        }
+    this.isProcessing = true;
+    try {
+      const file = this.app.workspace.getActiveFile();
+      if (!file) {
+        new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+        return;
       }
-    } else {
-      this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
-      new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
-      await this.statisticsService.recordFailure();
+      if (!(file instanceof import_obsidian10.TFile)) {
+        new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
+        return;
+      }
+      const content = await this.app.vault.read(file);
+      const selectedText = this.getSelectedText();
+      if (isSelection && !selectedText) {
+        new import_obsidian10.Notice("\u8BF7\u5148\u9009\u4E2D\u8981\u5904\u7406\u7684\u6587\u5B57");
+        return;
+      }
+      const context = {
+        notePath: file.path,
+        noteContent: content,
+        noteTitle: file.basename,
+        selectedText,
+        selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
+        selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
+        isSelection
+      };
+      const actionName = this.getActionName(actionType);
+      this.statusBarService.setProcessing(actionName);
+      new import_obsidian10.Notice(`\u6B63\u5728\u5904\u7406: ${actionName}...`);
+      const previewMode = this.settings.ui.confirmBeforeReplace;
+      const result = await this.actionHandler.execute(actionType, context, void 0, { previewOnly: true });
+      if (result.success && result.output) {
+        this.statusBarService.setCompleted(result.tokensUsed);
+        if (previewMode) {
+          this.previewService.showPreview(
+            result.originalContent || content,
+            result.output,
+            actionName,
+            async () => {
+              const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
+              if (applyResult.success) {
+                new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
+                this.addToHistory(actionType, actionName, file, applyResult, isSelection);
+                await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
+                  prompt: 0,
+                  completion: 0,
+                  total: result.tokensUsed
+                } : void 0);
+              }
+            },
+            () => {
+              new import_obsidian10.Notice("\u5DF2\u53D6\u6D88\u64CD\u4F5C");
+            }
+          );
+        } else {
+          const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
+          if (applyResult.success) {
+            new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
+            this.addToHistory(actionType, actionName, file, applyResult, isSelection);
+            await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
+              prompt: 0,
+              completion: 0,
+              total: result.tokensUsed
+            } : void 0);
+          }
+        }
+      } else {
+        this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
+        new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+        await this.statisticsService.recordFailure();
+      }
+    } finally {
+      this.isProcessing = false;
     }
   }
   /**
    * Execute a custom prompt
    */
   async executeCustomPrompt(promptId) {
-    const prompt = this.customPromptsService.getById(promptId);
-    if (!prompt) {
-      new import_obsidian10.Notice("Prompt \u4E0D\u5B58\u5728");
+    if (this.isProcessing) {
+      new import_obsidian10.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
       return;
     }
-    const file = this.app.workspace.getActiveFile();
-    if (!file) {
-      new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
-      return;
-    }
-    if (!(file instanceof import_obsidian10.TFile)) {
-      new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
-      return;
-    }
-    const content = await this.app.vault.read(file);
-    const selectedText = this.getSelectedText();
-    const isSelection = !!selectedText && prompt.outputMode === "selection";
-    const context = {
-      notePath: file.path,
-      noteContent: content,
-      noteTitle: file.basename,
-      selectedText,
-      selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
-      selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
-      isSelection
-    };
-    this.statusBarService.setProcessing(prompt.name);
-    new import_obsidian10.Notice(`\u6B63\u5728\u6267\u884C: ${prompt.name}...`);
-    const result = await this.actionHandler.execute("custom", context, prompt);
-    if (result.success) {
-      this.statusBarService.setCompleted(result.tokensUsed);
-      new import_obsidian10.Notice(`${prompt.name} \u5B8C\u6210`);
-      this.addToHistory("custom", prompt.name, file, result, isSelection);
-    } else {
-      this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
-      new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+    this.isProcessing = true;
+    try {
+      const prompt = this.customPromptsService.getById(promptId);
+      if (!prompt) {
+        new import_obsidian10.Notice("Prompt \u4E0D\u5B58\u5728");
+        return;
+      }
+      const file = this.app.workspace.getActiveFile();
+      if (!file) {
+        new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+        return;
+      }
+      if (!(file instanceof import_obsidian10.TFile)) {
+        new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
+        return;
+      }
+      const content = await this.app.vault.read(file);
+      const selectedText = this.getSelectedText();
+      const isSelection = !!selectedText && prompt.outputMode === "selection";
+      const context = {
+        notePath: file.path,
+        noteContent: content,
+        noteTitle: file.basename,
+        selectedText,
+        selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
+        selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
+        isSelection
+      };
+      this.statusBarService.setProcessing(prompt.name);
+      new import_obsidian10.Notice(`\u6B63\u5728\u6267\u884C: ${prompt.name}...`);
+      const result = await this.actionHandler.execute("custom", context, prompt);
+      if (result.success) {
+        this.statusBarService.setCompleted(result.tokensUsed);
+        new import_obsidian10.Notice(`${prompt.name} \u5B8C\u6210`);
+        this.addToHistory("custom", prompt.name, file, result, isSelection);
+      } else {
+        this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
+        new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+      }
+    } finally {
+      this.isProcessing = false;
     }
   }
   /**
@@ -3295,7 +3464,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       tokensUsed: (_a = result.tokensUsed) == null ? void 0 : _a.total
     };
     this.history.unshift(entry);
-    if (this.history.length > 20) {
+    if (this.history.length > MAX_HISTORY_ENTRIES) {
       this.history.pop();
     }
   }
@@ -3334,6 +3503,9 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
 var WorkbenchView = class extends import_obsidian10.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
+    this.noteInfoEl = null;
+    this.historyListEl = null;
+    this.isRendered = false;
     this.plugin = plugin;
   }
   getViewType() {
@@ -3350,12 +3522,21 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
   }
   render() {
     const container = this.containerEl.children[1];
-    container.empty();
-    container.addClass("ai-workbench");
+    if (!this.isRendered) {
+      container.empty();
+      container.addClass("ai-workbench");
+      this.renderStaticContent(container);
+      this.isRendered = true;
+    }
+    this.updateDynamicContent();
+  }
+  /**
+   * Render static content (actions, buttons, etc.) - only once
+   */
+  renderStaticContent(container) {
     const header = container.createDiv({ cls: "ai-workbench-header" });
     header.createEl("h2", { text: "AI \u5DE5\u4F5C\u53F0" });
-    const noteInfo = container.createDiv({ cls: "ai-workbench-note-info" });
-    this.updateNoteInfo(noteInfo);
+    this.noteInfoEl = container.createDiv({ cls: "ai-workbench-note-info" });
     const actionsContainer = container.createDiv({ cls: "ai-workbench-actions" });
     actionsContainer.createEl("h3", { text: "\u5FEB\u6377\u64CD\u4F5C" });
     const buttonsContainer = actionsContainer.createDiv({ cls: "ai-workbench-buttons" });
@@ -3437,13 +3618,30 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
     }
     const historyContainer = container.createDiv({ cls: "ai-workbench-history" });
     historyContainer.createEl("h3", { text: "\u6700\u8FD1\u64CD\u4F5C" });
-    const historyList = historyContainer.createDiv({ cls: "ai-workbench-history-list" });
-    this.renderHistory(historyList);
+    this.historyListEl = historyContainer.createDiv({ cls: "ai-workbench-history-list" });
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
-        this.updateNoteInfo(noteInfo);
+        this.updateDynamicContent();
       })
     );
+  }
+  /**
+   * Update dynamic content (current note, history) - called on every change
+   */
+  updateDynamicContent() {
+    if (this.noteInfoEl) {
+      this.noteInfoEl.empty();
+      const file = this.app.workspace.getActiveFile();
+      if (file) {
+        this.noteInfoEl.createEl("span", { text: "\u5F53\u524D\u7B14\u8BB0: " });
+        this.noteInfoEl.createEl("strong", { text: file.basename });
+      } else {
+        this.noteInfoEl.createEl("span", { text: "\u672A\u6253\u5F00\u7B14\u8BB0", cls: "muted" });
+      }
+    }
+    if (this.historyListEl) {
+      this.renderHistory(this.historyListEl);
+    }
   }
   groupByCategory(prompts) {
     const grouped = /* @__PURE__ */ new Map();
@@ -3465,16 +3663,6 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
       }
     }
     return result;
-  }
-  updateNoteInfo(container) {
-    container.empty();
-    const file = this.app.workspace.getActiveFile();
-    if (file) {
-      container.createEl("span", { text: "\u5F53\u524D\u7B14\u8BB0: " });
-      container.createEl("strong", { text: file.basename });
-    } else {
-      container.createEl("span", { text: "\u672A\u6253\u5F00\u7B14\u8BB0", cls: "muted" });
-    }
   }
   renderHistory(container) {
     container.empty();

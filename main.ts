@@ -31,6 +31,7 @@ import { HelpService } from './src/services/help';
 import { getCategorizedPresets, PRESET_CATEGORIES, PresetCategory } from './src/services/presets';
 import { ActionHandler } from './src/actions';
 import { WorkbenchSettingTab } from './src/settings';
+import { MAX_HISTORY_ENTRIES } from './src/constants';
 
 const VIEW_TYPE = 'ai-workbench-view';
 
@@ -51,6 +52,7 @@ export default class AIWorkbenchPlugin extends Plugin {
     private helpService: HelpService;
     private actionHandler: ActionHandler;
     private history: HistoryEntry[] = [];
+    private isProcessing: boolean = false; // Lock to prevent concurrent operations
 
     async onload() {
         await this.loadSettings();
@@ -348,82 +350,100 @@ export default class AIWorkbenchPlugin extends Plugin {
      * Execute an action on the current note
      */
     async executeAction(actionType: ActionType, isSelection: boolean = false): Promise<void> {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-            new Notice('没有打开的笔记');
+        // Prevent concurrent operations
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
             return;
         }
 
-        if (!(file instanceof TFile)) {
-            new Notice('当前文件不是笔记');
-            return;
-        }
+        this.isProcessing = true;
 
-        const content = await this.app.vault.read(file);
-        const selectedText = this.getSelectedText();
-
-        if (isSelection && !selectedText) {
-            new Notice('请先选中要处理的文字');
-            return;
-        }
-
-        const context = {
-            notePath: file.path,
-            noteContent: content,
-            noteTitle: file.basename,
-            selectedText,
-            selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
-            selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
-            isSelection
-        };
-
-        const actionName = this.getActionName(actionType);
-        this.statusBarService.setProcessing(actionName);
-        new Notice(`正在处理: ${actionName}...`);
-
-        // Check if preview mode is enabled
-        const previewMode = this.settings.ui.confirmBeforeReplace;
-
-        // Generate first and apply exactly once after optional confirmation.
-        const result = await this.actionHandler.execute(actionType, context, undefined, { previewOnly: true });
-
-        if (result.success && result.output) {
-            this.statusBarService.setCompleted(result.tokensUsed);
-
-            if (previewMode) {
-                // Show preview modal
-                this.previewService.showPreview(
-                    result.originalContent || content,
-                    result.output,
-                    actionName,
-                    async () => {
-                        // User accepted - apply the result
-                        const applyResult = await this.actionHandler.applyResult(actionType, context, result.output!);
-                        if (applyResult.success) {
-                            new Notice(`${actionName} 完成`);
-                            this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-                        }
-                    },
-                    () => {
-                        new Notice('已取消操作');
-                    }
-                );
-            } else {
-                const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
-                if (applyResult.success) {
-                    new Notice(`${actionName} 完成`);
-                    this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-                    await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
-                        prompt: 0,
-                        completion: 0,
-                        total: result.tokensUsed
-                    } : undefined);
-                }
+        try {
+            const file = this.app.workspace.getActiveFile();
+            if (!file) {
+                new Notice('没有打开的笔记');
+                return;
             }
-        } else {
-            this.statusBarService.setError(result.error || '未知错误');
-            new Notice(`操作失败: ${result.error}`);
-            await this.statisticsService.recordFailure();
+
+            if (!(file instanceof TFile)) {
+                new Notice('当前文件不是笔记');
+                return;
+            }
+
+            const content = await this.app.vault.read(file);
+            const selectedText = this.getSelectedText();
+
+            if (isSelection && !selectedText) {
+                new Notice('请先选中要处理的文字');
+                return;
+            }
+
+            const context = {
+                notePath: file.path,
+                noteContent: content,
+                noteTitle: file.basename,
+                selectedText,
+                selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
+                selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
+                isSelection
+            };
+
+            const actionName = this.getActionName(actionType);
+            this.statusBarService.setProcessing(actionName);
+            new Notice(`正在处理: ${actionName}...`);
+
+            // Check if preview mode is enabled
+            const previewMode = this.settings.ui.confirmBeforeReplace;
+
+            // Generate first and apply exactly once after optional confirmation.
+            const result = await this.actionHandler.execute(actionType, context, undefined, { previewOnly: true });
+
+            if (result.success && result.output) {
+                this.statusBarService.setCompleted(result.tokensUsed);
+
+                if (previewMode) {
+                    // Show preview modal
+                    this.previewService.showPreview(
+                        result.originalContent || content,
+                        result.output,
+                        actionName,
+                        async () => {
+                            // User accepted - apply the result
+                            const applyResult = await this.actionHandler.applyResult(actionType, context, result.output!);
+                            if (applyResult.success) {
+                                new Notice(`${actionName} 完成`);
+                                this.addToHistory(actionType, actionName, file, applyResult, isSelection);
+                                // Record statistics for preview mode
+                                await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
+                                    prompt: 0,
+                                    completion: 0,
+                                    total: result.tokensUsed
+                                } : undefined);
+                            }
+                        },
+                        () => {
+                            new Notice('已取消操作');
+                        }
+                    );
+                } else {
+                    const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
+                    if (applyResult.success) {
+                        new Notice(`${actionName} 完成`);
+                        this.addToHistory(actionType, actionName, file, applyResult, isSelection);
+                        await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
+                            prompt: 0,
+                            completion: 0,
+                            total: result.tokensUsed
+                        } : undefined);
+                    }
+                }
+            } else {
+                this.statusBarService.setError(result.error || '未知错误');
+                new Notice(`操作失败: ${result.error}`);
+                await this.statisticsService.recordFailure();
+            }
+        } finally {
+            this.isProcessing = false;
         }
     }
 
@@ -431,49 +451,61 @@ export default class AIWorkbenchPlugin extends Plugin {
      * Execute a custom prompt
      */
     async executeCustomPrompt(promptId: string): Promise<void> {
-        const prompt = this.customPromptsService.getById(promptId);
-        if (!prompt) {
-            new Notice('Prompt 不存在');
+        // Prevent concurrent operations
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
             return;
         }
 
-        const file = this.app.workspace.getActiveFile();
-        if (!file) {
-            new Notice('没有打开的笔记');
-            return;
-        }
+        this.isProcessing = true;
 
-        if (!(file instanceof TFile)) {
-            new Notice('当前文件不是笔记');
-            return;
-        }
+        try {
+            const prompt = this.customPromptsService.getById(promptId);
+            if (!prompt) {
+                new Notice('Prompt 不存在');
+                return;
+            }
 
-        const content = await this.app.vault.read(file);
-        const selectedText = this.getSelectedText();
-        const isSelection = !!selectedText && prompt.outputMode === 'selection';
+            const file = this.app.workspace.getActiveFile();
+            if (!file) {
+                new Notice('没有打开的笔记');
+                return;
+            }
 
-        const context = {
-            notePath: file.path,
-            noteContent: content,
-            noteTitle: file.basename,
-            selectedText,
-            selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
-            selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
-            isSelection
-        };
+            if (!(file instanceof TFile)) {
+                new Notice('当前文件不是笔记');
+                return;
+            }
 
-        this.statusBarService.setProcessing(prompt.name);
-        new Notice(`正在执行: ${prompt.name}...`);
+            const content = await this.app.vault.read(file);
+            const selectedText = this.getSelectedText();
+            const isSelection = !!selectedText && prompt.outputMode === 'selection';
 
-        const result = await this.actionHandler.execute('custom', context, prompt);
+            const context = {
+                notePath: file.path,
+                noteContent: content,
+                noteTitle: file.basename,
+                selectedText,
+                selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
+                selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
+                isSelection
+            };
 
-        if (result.success) {
-            this.statusBarService.setCompleted(result.tokensUsed);
-            new Notice(`${prompt.name} 完成`);
-            this.addToHistory('custom', prompt.name, file, result, isSelection);
-        } else {
-            this.statusBarService.setError(result.error || '未知错误');
-            new Notice(`操作失败: ${result.error}`);
+            this.statusBarService.setProcessing(prompt.name);
+            new Notice(`正在执行: ${prompt.name}...`);
+
+            const result = await this.actionHandler.execute('custom', context, prompt);
+
+            if (result.success) {
+                this.statusBarService.setCompleted(result.tokensUsed);
+                new Notice(`${prompt.name} 完成`);
+                this.addToHistory('custom', prompt.name, file, result, isSelection);
+            } else {
+                this.statusBarService.setError(result.error || '未知错误');
+                new Notice(`操作失败: ${result.error}`);
+            }
+        } finally {
+            this.isProcessing = false;
         }
     }
 
@@ -600,7 +632,8 @@ export default class AIWorkbenchPlugin extends Plugin {
         };
 
         this.history.unshift(entry);
-        if (this.history.length > 20) {
+        // Limit history to MAX_HISTORY_ENTRIES
+        if (this.history.length > MAX_HISTORY_ENTRIES) {
             this.history.pop();
         }
     }
@@ -648,6 +681,9 @@ export default class AIWorkbenchPlugin extends Plugin {
  */
 class WorkbenchView extends ItemView {
     private plugin: AIWorkbenchPlugin;
+    private noteInfoEl: HTMLElement | null = null;
+    private historyListEl: HTMLElement | null = null;
+    private isRendered: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: AIWorkbenchPlugin) {
         super(leaf);
@@ -672,16 +708,29 @@ class WorkbenchView extends ItemView {
 
     private render() {
         const container = this.containerEl.children[1];
-        container.empty();
-        container.addClass('ai-workbench');
 
+        // Only render static content once
+        if (!this.isRendered) {
+            container.empty();
+            container.addClass('ai-workbench');
+            this.renderStaticContent(container);
+            this.isRendered = true;
+        }
+
+        // Always update dynamic content
+        this.updateDynamicContent();
+    }
+
+    /**
+     * Render static content (actions, buttons, etc.) - only once
+     */
+    private renderStaticContent(container: HTMLElement) {
         // Header
         const header = container.createDiv({ cls: 'ai-workbench-header' });
         header.createEl('h2', { text: 'AI 工作台' });
 
-        // Current note info
-        const noteInfo = container.createDiv({ cls: 'ai-workbench-note-info' });
-        this.updateNoteInfo(noteInfo);
+        // Current note info (will be updated dynamically)
+        this.noteInfoEl = container.createDiv({ cls: 'ai-workbench-note-info' });
 
         // Quick actions
         const actionsContainer = container.createDiv({ cls: 'ai-workbench-actions' });
@@ -712,7 +761,6 @@ class WorkbenchView extends ItemView {
         // Custom Prompts - grouped by category
         const customPrompts = this.plugin.getCustomPromptsService().getAll();
         if (customPrompts.length > 0) {
-            // Group prompts by category
             const grouped = this.groupByCategory(customPrompts);
 
             for (const [categoryId, prompts] of grouped) {
@@ -725,14 +773,12 @@ class WorkbenchView extends ItemView {
 
                 const categoryContainer = container.createDiv({ cls: 'ai-workbench-category' });
 
-                // Category header
                 const header = categoryContainer.createDiv({ cls: 'ai-workbench-category-header' });
                 header.createEl('span', {
                     text: `${category.icon} ${category.name}`,
                     cls: 'category-title'
                 });
 
-                // Buttons
                 const buttonsContainer = categoryContainer.createDiv({ cls: 'ai-workbench-buttons' });
 
                 for (const prompt of prompts) {
@@ -773,7 +819,6 @@ class WorkbenchView extends ItemView {
                 notAvailable.createEl('span', { text: 'Claudian 插件未安装或未启用' });
             }
 
-            // Backup management
             const backupBtn = claudianContainer.createEl('button', {
                 cls: 'ai-workbench-claudian-btn',
                 text: '📦 备份管理'
@@ -786,15 +831,36 @@ class WorkbenchView extends ItemView {
         // History
         const historyContainer = container.createDiv({ cls: 'ai-workbench-history' });
         historyContainer.createEl('h3', { text: '最近操作' });
-        const historyList = historyContainer.createDiv({ cls: 'ai-workbench-history-list' });
-        this.renderHistory(historyList);
+        this.historyListEl = historyContainer.createDiv({ cls: 'ai-workbench-history-list' });
 
-        // Refresh on file change
+        // Register event for updating note info when switching files
         this.registerEvent(
             this.app.workspace.on('active-leaf-change', () => {
-                this.updateNoteInfo(noteInfo);
+                this.updateDynamicContent();
             })
         );
+    }
+
+    /**
+     * Update dynamic content (current note, history) - called on every change
+     */
+    private updateDynamicContent() {
+        // Update current note info
+        if (this.noteInfoEl) {
+            this.noteInfoEl.empty();
+            const file = this.app.workspace.getActiveFile();
+            if (file) {
+                this.noteInfoEl.createEl('span', { text: '当前笔记: ' });
+                this.noteInfoEl.createEl('strong', { text: file.basename });
+            } else {
+                this.noteInfoEl.createEl('span', { text: '未打开笔记', cls: 'muted' });
+            }
+        }
+
+        // Update history
+        if (this.historyListEl) {
+            this.renderHistory(this.historyListEl);
+        }
     }
 
     private groupByCategory(prompts: CustomPrompt[]): Map<string, CustomPrompt[]> {
@@ -826,16 +892,6 @@ class WorkbenchView extends ItemView {
         return result;
     }
 
-    private updateNoteInfo(container: HTMLElement) {
-        container.empty();
-        const file = this.app.workspace.getActiveFile();
-        if (file) {
-            container.createEl('span', { text: '当前笔记: ' });
-            container.createEl('strong', { text: file.basename });
-        } else {
-            container.createEl('span', { text: '未打开笔记', cls: 'muted' });
-        }
-    }
 
     private renderHistory(container: HTMLElement) {
         container.empty();

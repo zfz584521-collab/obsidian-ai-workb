@@ -2,7 +2,7 @@
  * Backup Manager Service - List and restore backups
  */
 
-import { App, TFile, Modal, Setting, Notice } from 'obsidian';
+import { App, TFile, TFolder, Modal, Setting, Notice } from 'obsidian';
 import { BackupSettings } from '../types';
 
 interface BackupInfo {
@@ -25,37 +25,50 @@ export class BackupManager {
     }
 
     /**
-     * List all backups
+     * List all backups - optimized to only scan backup directory
      */
     async listBackups(): Promise<BackupInfo[]> {
         const vault = this.app.vault;
-        const adapter = vault.adapter;
 
-        if (!await adapter.exists(this.backupDir)) {
+        try {
+            // Get backup folder directly instead of scanning all files
+            const backupFolder = vault.getAbstractFileByPath(this.backupDir);
+
+            // If backup folder doesn't exist, return empty
+            if (!backupFolder) {
+                return [];
+            }
+
+            // Check if it's a folder
+            if (backupFolder instanceof TFolder) {
+                // Only get files from backup directory - much faster!
+                const backupFiles = backupFolder.children.filter(f => f instanceof TFile) as TFile[];
+
+                const backups: BackupInfo[] = [];
+
+                for (const file of backupFiles) {
+                    const info = this.parseBackupFilename(file.name);
+                    if (info) {
+                        backups.push({
+                            path: file.path,
+                            filename: file.name,
+                            originalFile: info.originalFile,
+                            originalPath: info.originalPath,
+                            createdAt: new Date(file.stat.mtime),
+                            size: file.stat.size
+                        });
+                    }
+                }
+
+                // Sort by date, newest first
+                return backups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+            }
+
+            return [];
+        } catch (error) {
+            console.error('[AI Workbench] Error listing backups:', error);
             return [];
         }
-
-        const files = vault.getFiles();
-        const backupFiles = files.filter(f => f.path.startsWith(this.backupDir));
-
-        const backups: BackupInfo[] = [];
-
-        for (const file of backupFiles) {
-            const info = this.parseBackupFilename(file.name);
-            if (info) {
-                backups.push({
-                    path: file.path,
-                    filename: file.name,
-                    originalFile: info.originalFile,
-                    originalPath: info.originalPath,
-                    createdAt: new Date(file.stat.mtime),
-                    size: file.stat.size
-                });
-            }
-        }
-
-        // Sort by date, newest first
-        return backups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     }
 
     /**

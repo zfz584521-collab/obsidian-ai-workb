@@ -7,6 +7,7 @@ import { AIService } from '../services/ai';
 import { BackupService } from '../services/backup';
 import { FileService } from '../services/file';
 import { ActionType, ActionContext, ActionResult, WorkbenchSettings, BUILTIN_PROMPTS, CustomPrompt } from '../types';
+import { MAX_SELECTION_OFFSET } from '../constants';
 
 export interface ExecuteOptions {
     previewOnly?: boolean;
@@ -77,41 +78,7 @@ export class ActionHandler {
 
             // Handle output
             const file = this.getTargetFile(context.notePath);
-            let outputPath: string | undefined;
-
-            // If processing selection with 'selection' mode, replace the selected text
-            if (context.isSelection && outputMode === 'selection') {
-                await this.backupService.backup(file);
-                await this.replaceSelection(context, response.content);
-            } else {
-                switch (outputMode) {
-                    case 'append':
-                        await this.backupService.backup(file);
-                        const sectionTitle = this.getSectionTitle(actionType, customPrompt);
-                        await this.fileService.append(file, response.content, sectionTitle);
-                        break;
-
-                    case 'prepend':
-                        await this.backupService.backup(file);
-                        await this.fileService.prepend(file, response.content, this.getSectionTitle(actionType, customPrompt));
-                        break;
-
-                    case 'replace':
-                        await this.backupService.backup(file);
-                        await this.fileService.replace(file, response.content);
-                        break;
-
-                    case 'newFile':
-                        const suffix = this.getOutputSuffix(actionType, customPrompt);
-                        const newFile = await this.fileService.createNewFile(file, suffix, response.content);
-                        outputPath = newFile.path;
-                        break;
-
-                    case 'selection':
-                        // Handled above
-                        break;
-                }
-            }
+            const outputPath = await this.handleOutput(outputMode, file, response.content, actionType, context, customPrompt);
 
             return {
                 success: true,
@@ -146,38 +113,8 @@ export class ActionHandler {
 
         try {
             const file = this.getTargetFile(context.notePath);
-            let outputPath: string | undefined;
-
             const outputMode = customPrompt?.outputMode || this.getDefaultOutputMode(actionType, context.isSelection);
-
-            if (context.isSelection && outputMode === 'selection') {
-                await this.backupService.backup(file);
-                await this.replaceSelection(context, output);
-            } else {
-                switch (outputMode) {
-                    case 'append':
-                        await this.backupService.backup(file);
-                        const sectionTitle = this.getSectionTitle(actionType, customPrompt);
-                        await this.fileService.append(file, output, sectionTitle);
-                        break;
-
-                    case 'prepend':
-                        await this.backupService.backup(file);
-                        await this.fileService.prepend(file, output, this.getSectionTitle(actionType, customPrompt));
-                        break;
-
-                    case 'replace':
-                        await this.backupService.backup(file);
-                        await this.fileService.replace(file, output);
-                        break;
-
-                    case 'newFile':
-                        const suffix = this.getOutputSuffix(actionType, customPrompt);
-                        const newFile = await this.fileService.createNewFile(file, suffix, output);
-                        outputPath = newFile.path;
-                        break;
-                }
-            }
+            const outputPath = await this.handleOutput(outputMode, file, output, actionType, context, customPrompt);
 
             return {
                 success: true,
@@ -197,6 +134,54 @@ export class ActionHandler {
     }
 
     /**
+     * Handle output based on mode - extracted to reduce code duplication
+     */
+    private async handleOutput(
+        outputMode: 'append' | 'prepend' | 'newFile' | 'replace' | 'selection',
+        file: TFile,
+        content: string,
+        actionType: ActionType,
+        context: ActionContext,
+        customPrompt?: CustomPrompt
+    ): Promise<string | undefined> {
+        // If processing selection with 'selection' mode, replace the selected text
+        if (context.isSelection && outputMode === 'selection') {
+            await this.backupService.backup(file);
+            await this.replaceSelection(context, content);
+            return undefined;
+        }
+
+        switch (outputMode) {
+            case 'append':
+                await this.backupService.backup(file);
+                await this.fileService.append(file, content, this.getSectionTitle(actionType, customPrompt));
+                return undefined;
+
+            case 'prepend':
+                await this.backupService.backup(file);
+                await this.fileService.prepend(file, content, this.getSectionTitle(actionType, customPrompt));
+                return undefined;
+
+            case 'replace':
+                await this.backupService.backup(file);
+                await this.fileService.replace(file, content);
+                return undefined;
+
+            case 'newFile':
+                const suffix = this.getOutputSuffix(actionType, customPrompt);
+                const newFile = await this.fileService.createNewFile(file, suffix, content);
+                return newFile.path;
+
+            case 'selection':
+                // Handled above
+                return undefined;
+
+            default:
+                return undefined;
+        }
+    }
+
+    /**
      * Replace selected text in the editor
      */
     private async replaceSelection(context: ActionContext, newContent: string): Promise<void> {
@@ -210,11 +195,34 @@ export class ActionHandler {
             throw new Error('编辑器不可用');
         }
 
+        // Check if the current content matches the expected selection
         const currentText = editor.getRange(context.selectionFrom, context.selectionTo);
+
         if (currentText !== context.selectedText) {
-            throw new Error('原选区已发生变化，请重新执行操作');
+            // Content has changed - try to find the original text in the document
+            const fullContent = editor.getValue();
+            const originalIndex = fullContent.indexOf(context.selectedText);
+
+            if (originalIndex === -1) {
+                // Original text not found anywhere in the document
+                throw new Error('原选区内容已被修改或删除，无法替换。请撤销更改后重试。');
+            }
+
+            // Found the text but position changed
+            // Calculate the offset to see how much the position shifted
+            const originalPos = editor.posToOffset(context.selectionFrom);
+            const foundPos = originalIndex;
+
+            if (Math.abs(foundPos - originalPos) > MAX_SELECTION_OFFSET) {
+                // Position shifted significantly - warn the user
+                throw new Error(`检测到内容位置变化（偏移 ${Math.abs(foundPos - originalPos)} 字符），为安全起见已取消操作。请重新选择文本后重试。`);
+            }
+
+            // Small shift might be acceptable, but we still notify
+            console.warn('[AI Workbench] Selection position shifted by', foundPos - originalPos, 'characters');
         }
 
+        // Perform the replacement
         editor.replaceRange(newContent, context.selectionFrom, context.selectionTo);
     }
 

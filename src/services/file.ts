@@ -4,6 +4,7 @@
 
 import { App, TFile, normalizePath } from 'obsidian';
 import { OutputSettings } from '../types';
+import { MAX_FILENAME_CONFLICT_ATTEMPTS, MARKDOWN_EXTENSION } from '../constants';
 
 export class FileService {
     private app: App;
@@ -84,13 +85,17 @@ export class FileService {
         const parent = originalFile.parent;
 
         // Generate new filename
-        let newFilename = `${originalFile.basename}-${suffix}.md`;
+        let newFilename = `${originalFile.basename}-${suffix}${MARKDOWN_EXTENSION}`;
         let newPath = parent ? normalizePath(`${parent.path}/${newFilename}`) : newFilename;
 
         // Check if file exists, add number if needed
         let counter = 1;
         while (await vault.adapter.exists(newPath)) {
-            newFilename = `${originalFile.basename}-${suffix}-${counter}.md`;
+            if (counter > MAX_FILENAME_CONFLICT_ATTEMPTS) {
+                throw new Error('无法创建新文件：文件名冲突过多，请手动删除部分备份文件');
+            }
+
+            newFilename = `${originalFile.basename}-${suffix}-${counter}${MARKDOWN_EXTENSION}`;
             newPath = parent ? normalizePath(`${parent.path}/${newFilename}`) : newFilename;
             counter++;
         }

@@ -3,8 +3,9 @@
  */
 
 import { CustomPrompt, CustomPromptSettings } from '../types';
+import { ICustomPromptsService } from '../interfaces';
 
-export class CustomPromptsService {
+export class CustomPromptsService implements ICustomPromptsService {
     private settings: CustomPromptSettings;
 
     constructor(settings: CustomPromptSettings) {
