@@ -74,8 +74,9 @@ export class BackupService {
     private async fileBackup(file: TFile): Promise<string> {
         const vault = this.app.vault;
         const timestamp = this.getTimestamp();
+        const fileIdentity = this.getFileIdentity(file.path);
         const backupPath = normalizePath(
-            `${this.backupDir}/${file.basename}-${timestamp}.${file.extension}`
+            `${this.backupDir}/${fileIdentity}--${timestamp}.${file.extension}`
         );
 
         // Ensure backup directory exists
@@ -88,7 +89,7 @@ export class BackupService {
         await vault.create(backupPath, content);
 
         // Clean up old backups
-        await this.cleanupOldBackups(file.basename);
+        await this.cleanupOldBackups(file.path);
 
         return backupPath;
     }
@@ -108,7 +109,7 @@ export class BackupService {
     /**
      * Remove old backups, keeping only the most recent ones
      */
-    private async cleanupOldBackups(fileBasename: string): Promise<void> {
+    private async cleanupOldBackups(filePath: string): Promise<void> {
         const vault = this.app.vault;
         const adapter = vault.adapter;
 
@@ -118,8 +119,9 @@ export class BackupService {
 
         // List all backup files for this note
         const files = vault.getFiles();
+        const filePrefix = `${this.getFileIdentity(filePath)}--`;
         const backupFiles = files
-            .filter(f => f.path.startsWith(this.backupDir) && f.name.startsWith(fileBasename))
+            .filter(f => f.path.startsWith(`${this.backupDir}/`) && f.name.startsWith(filePrefix))
             .sort((a, b) => b.stat.mtime - a.stat.mtime);
 
         // Remove old backups beyond maxCount
@@ -134,7 +136,11 @@ export class BackupService {
      */
     private getTimestamp(): string {
         const now = new Date();
-        return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+        return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}${String(now.getMilliseconds()).padStart(3, '0')}`;
+    }
+
+    private getFileIdentity(filePath: string): string {
+        return encodeURIComponent(normalizePath(filePath));
     }
 
     /**

@@ -115,9 +115,16 @@ export interface ActionContext {
     noteContent: string;
     noteTitle: string;
     selectedText?: string;
+    selectionFrom?: EditorPosition;
+    selectionTo?: EditorPosition;
     customPromptId?: string;
     isSelection: boolean;
     variables?: Record<string, string>;
+}
+
+export interface EditorPosition {
+    line: number;
+    ch: number;
 }
 
 export interface ActionResult {

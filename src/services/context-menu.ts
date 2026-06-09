@@ -37,10 +37,9 @@ export class ContextMenuService {
      * Register context menu for editor
      */
     register() {
-        if (!this.settings.enabled) return;
-
         this.plugin.registerEvent(
             this.app.workspace.on('editor-menu', (menu: Menu, editor: any, view: MarkdownView) => {
+                if (!this.settings.enabled) return;
                 this.buildMenu(menu, view, editor);
             })
         );
@@ -48,7 +47,7 @@ export class ContextMenuService {
         // File context menu
         this.plugin.registerEvent(
             this.app.workspace.on('file-menu', (menu: Menu, file: TFile) => {
-                if (file.extension === 'md') {
+                if (this.settings.enabled && file.extension === 'md') {
                     this.buildFileMenu(menu, file);
                 }
             })

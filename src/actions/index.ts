@@ -76,12 +76,13 @@ export class ActionHandler {
             }
 
             // Handle output
-            const file = this.app.vault.getAbstractFileByPath(context.notePath) as TFile;
+            const file = this.getTargetFile(context.notePath);
             let outputPath: string | undefined;
 
             // If processing selection with 'selection' mode, replace the selected text
             if (context.isSelection && outputMode === 'selection') {
-                await this.replaceSelection(response.content);
+                await this.backupService.backup(file);
+                await this.replaceSelection(context, response.content);
             } else {
                 switch (outputMode) {
                     case 'append':
@@ -144,13 +145,14 @@ export class ActionHandler {
         const timestamp = Date.now();
 
         try {
-            const file = this.app.vault.getAbstractFileByPath(context.notePath) as TFile;
+            const file = this.getTargetFile(context.notePath);
             let outputPath: string | undefined;
 
             const outputMode = customPrompt?.outputMode || this.getDefaultOutputMode(actionType, context.isSelection);
 
             if (context.isSelection && outputMode === 'selection') {
-                await this.replaceSelection(output);
+                await this.backupService.backup(file);
+                await this.replaceSelection(context, output);
             } else {
                 switch (outputMode) {
                     case 'append':
@@ -197,23 +199,31 @@ export class ActionHandler {
     /**
      * Replace selected text in the editor
      */
-    private async replaceSelection(newContent: string): Promise<void> {
+    private async replaceSelection(context: ActionContext, newContent: string): Promise<void> {
         const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view) {
-            throw new Error('无法获取编辑器');
+        if (!view || view.file?.path !== context.notePath) {
+            throw new Error('原笔记已不在活动编辑器中，请重新执行操作');
         }
 
         const editor = view.editor;
-        if (!editor) {
+        if (!editor || !context.selectionFrom || !context.selectionTo) {
             throw new Error('编辑器不可用');
         }
 
-        const selection = editor.getSelection();
-        if (!selection) {
-            throw new Error('没有选中的文本');
+        const currentText = editor.getRange(context.selectionFrom, context.selectionTo);
+        if (currentText !== context.selectedText) {
+            throw new Error('原选区已发生变化，请重新执行操作');
         }
 
-        editor.replaceSelection(newContent);
+        editor.replaceRange(newContent, context.selectionFrom, context.selectionTo);
+    }
+
+    private getTargetFile(notePath: string): TFile {
+        const file = this.app.vault.getAbstractFileByPath(notePath);
+        if (!(file instanceof TFile)) {
+            throw new Error('目标笔记不存在');
+        }
+        return file;
     }
 
     private getPrompt(actionType: ActionType, customPrompt?: CustomPrompt): string {
@@ -230,6 +240,7 @@ export class ActionHandler {
 
         switch (actionType) {
             case 'summarize':
+                return this.settings.output.summaryPosition;
             case 'outline':
             case 'mindmap':
             case 'mermaid':

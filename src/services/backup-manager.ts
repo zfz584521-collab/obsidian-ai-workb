@@ -9,6 +9,7 @@ interface BackupInfo {
     path: string;
     filename: string;
     originalFile: string;
+    originalPath?: string;
     createdAt: Date;
     size: number;
 }
@@ -46,6 +47,7 @@ export class BackupManager {
                     path: file.path,
                     filename: file.name,
                     originalFile: info.originalFile,
+                    originalPath: info.originalPath,
                     createdAt: new Date(file.stat.mtime),
                     size: file.stat.size
                 });
@@ -59,8 +61,20 @@ export class BackupManager {
     /**
      * Parse backup filename
      */
-    private parseBackupFilename(filename: string): { originalFile: string } | null {
-        // Format: originalname-YYYYMMDD-HHMMSS.md
+    private parseBackupFilename(filename: string): { originalFile: string; originalPath?: string } | null {
+        // Current format: encoded/path.md--YYYYMMDD-HHMMSSmmm.md
+        const currentMatch = filename.match(/^(.+)--(\d{8}-\d{9})\.[^.]+$/);
+        if (currentMatch) {
+            try {
+                const originalPath = decodeURIComponent(currentMatch[1]);
+                const originalFile = originalPath.split('/').pop()?.replace(/\.[^.]+$/, '') || originalPath;
+                return { originalFile, originalPath };
+            } catch {
+                return null;
+            }
+        }
+
+        // Legacy format: originalname-YYYYMMDD-HHMMSS.md
         const match = filename.match(/^(.+)-(\d{8}-\d{6})\.md$/);
         if (!match) return null;
 
@@ -168,7 +182,10 @@ class BackupListModal extends Modal {
 
         // Filter by original file if specified
         const filteredBackups = this.originalPath
-            ? this.backups.filter(b => b.originalFile === this.originalPath?.replace(/\.md$/, '').split('/').pop())
+            ? this.backups.filter(b =>
+                b.originalPath === this.originalPath ||
+                (!b.originalPath && b.originalFile === this.originalPath?.replace(/\.md$/, '').split('/').pop())
+            )
             : this.backups;
 
         if (filteredBackups.length === 0) {

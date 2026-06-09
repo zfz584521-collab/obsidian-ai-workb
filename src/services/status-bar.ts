@@ -2,7 +2,7 @@
  * Status Bar Service - Show AI status in status bar
  */
 
-import { App, Plugin, StatusBar } from 'obsidian';
+import { App, Plugin } from 'obsidian';
 
 export class StatusBarService {
     private app: App;
@@ -58,10 +58,12 @@ export class StatusBarService {
     /**
      * Set completed state
      */
-    setCompleted(tokens?: { prompt: number; completion: number; total: number }) {
+    setCompleted(tokens?: { prompt: number; completion: number; total: number } | number) {
         this.isProcessing = false;
         this.currentAction = '';
-        this.tokenCount = tokens || null;
+        this.tokenCount = typeof tokens === 'number'
+            ? { prompt: 0, completion: 0, total: tokens }
+            : tokens || null;
         this.render();
 
         // Auto-hide token count after 5 seconds

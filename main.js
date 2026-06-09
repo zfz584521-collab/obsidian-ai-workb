@@ -327,13 +327,14 @@ var BackupService = class {
   async fileBackup(file) {
     const vault = this.app.vault;
     const timestamp = this.getTimestamp();
+    const fileIdentity = this.getFileIdentity(file.path);
     const backupPath = (0, import_obsidian.normalizePath)(
-      `${this.backupDir}/${file.basename}-${timestamp}.${file.extension}`
+      `${this.backupDir}/${fileIdentity}--${timestamp}.${file.extension}`
     );
     await this.ensureBackupDir();
     const content = await vault.read(file);
     await vault.create(backupPath, content);
-    await this.cleanupOldBackups(file.basename);
+    await this.cleanupOldBackups(file.path);
     return backupPath;
   }
   /**
@@ -349,14 +350,15 @@ var BackupService = class {
   /**
    * Remove old backups, keeping only the most recent ones
    */
-  async cleanupOldBackups(fileBasename) {
+  async cleanupOldBackups(filePath) {
     const vault = this.app.vault;
     const adapter = vault.adapter;
     if (!await adapter.exists(this.backupDir)) {
       return;
     }
     const files = vault.getFiles();
-    const backupFiles = files.filter((f) => f.path.startsWith(this.backupDir) && f.name.startsWith(fileBasename)).sort((a, b) => b.stat.mtime - a.stat.mtime);
+    const filePrefix = `${this.getFileIdentity(filePath)}--`;
+    const backupFiles = files.filter((f) => f.path.startsWith(`${this.backupDir}/`) && f.name.startsWith(filePrefix)).sort((a, b) => b.stat.mtime - a.stat.mtime);
     const toRemove = backupFiles.slice(this.settings.maxCount);
     for (const file of toRemove) {
       await vault.delete(file);
@@ -367,7 +369,10 @@ var BackupService = class {
    */
   getTimestamp() {
     const now = /* @__PURE__ */ new Date();
-    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
+    return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}${String(now.getMilliseconds()).padStart(3, "0")}`;
+  }
+  getFileIdentity(filePath) {
+    return encodeURIComponent((0, import_obsidian.normalizePath)(filePath));
   }
   /**
    * Restore from backup
@@ -416,6 +421,7 @@ var BackupManager = class {
           path: file.path,
           filename: file.name,
           originalFile: info.originalFile,
+          originalPath: info.originalPath,
           createdAt: new Date(file.stat.mtime),
           size: file.stat.size
         });
@@ -427,6 +433,17 @@ var BackupManager = class {
    * Parse backup filename
    */
   parseBackupFilename(filename) {
+    var _a;
+    const currentMatch = filename.match(/^(.+)--(\d{8}-\d{9})\.[^.]+$/);
+    if (currentMatch) {
+      try {
+        const originalPath = decodeURIComponent(currentMatch[1]);
+        const originalFile = ((_a = originalPath.split("/").pop()) == null ? void 0 : _a.replace(/\.[^.]+$/, "")) || originalPath;
+        return { originalFile, originalPath };
+      } catch (e) {
+        return null;
+      }
+    }
     const match = filename.match(/^(.+)-(\d{8}-\d{6})\.md$/);
     if (!match)
       return null;
@@ -508,10 +525,12 @@ var BackupListModal = class extends import_obsidian2.Modal {
     contentEl.addClass("ai-workbench-backup-modal");
     contentEl.createEl("h3", { text: "\u5907\u4EFD\u7BA1\u7406" });
     this.backups = await this.manager.listBackups();
-    const filteredBackups = this.originalPath ? this.backups.filter((b) => {
-      var _a;
-      return b.originalFile === ((_a = this.originalPath) == null ? void 0 : _a.replace(/\.md$/, "").split("/").pop());
-    }) : this.backups;
+    const filteredBackups = this.originalPath ? this.backups.filter(
+      (b) => {
+        var _a;
+        return b.originalPath === this.originalPath || !b.originalPath && b.originalFile === ((_a = this.originalPath) == null ? void 0 : _a.replace(/\.md$/, "").split("/").pop());
+      }
+    ) : this.backups;
     if (filteredBackups.length === 0) {
       contentEl.createEl("p", { text: "\u6682\u65E0\u5907\u4EFD", cls: "muted" });
     } else {
@@ -898,6 +917,7 @@ var CustomPromptsService = class {
 var ShortcutsService = class {
   constructor(app, plugin, settings) {
     this.registeredShortcuts = /* @__PURE__ */ new Map();
+    this.keydownHandlers = /* @__PURE__ */ new Set();
     this.app = app;
     this.plugin = plugin;
     this.settings = settings;
@@ -921,13 +941,15 @@ var ShortcutsService = class {
    */
   register(binding, executeAction) {
     const key = this.getShortcutKey(binding);
-    this.plugin.registerDomEvent(document, "keydown", (evt) => {
+    const handler = (evt) => {
       if (this.matchesBinding(evt, binding)) {
         evt.preventDefault();
         evt.stopPropagation();
         executeAction(binding.actionId, binding.customPromptId);
       }
-    });
+    };
+    document.addEventListener("keydown", handler);
+    this.keydownHandlers.add(handler);
     this.registeredShortcuts.set(key, () => executeAction(binding.actionId, binding.customPromptId));
   }
   /**
@@ -956,6 +978,10 @@ var ShortcutsService = class {
    * Clear all registered shortcuts
    */
   clearAll() {
+    for (const handler of this.keydownHandlers) {
+      document.removeEventListener("keydown", handler);
+    }
+    this.keydownHandlers.clear();
     this.registeredShortcuts.clear();
   }
   /**
@@ -1033,16 +1059,16 @@ var ContextMenuService = class {
    * Register context menu for editor
    */
   register() {
-    if (!this.settings.enabled)
-      return;
     this.plugin.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
+        if (!this.settings.enabled)
+          return;
         this.buildMenu(menu, view, editor);
       })
     );
     this.plugin.registerEvent(
       this.app.workspace.on("file-menu", (menu, file) => {
-        if (file.extension === "md") {
+        if (this.settings.enabled && file.extension === "md") {
           this.buildFileMenu(menu, file);
         }
       })
@@ -1166,7 +1192,7 @@ var StatusBarService = class {
   setCompleted(tokens) {
     this.isProcessing = false;
     this.currentAction = "";
-    this.tokenCount = tokens || null;
+    this.tokenCount = typeof tokens === "number" ? { prompt: 0, completion: 0, total: tokens } : tokens || null;
     this.render();
     if (tokens) {
       setTimeout(() => {
@@ -1240,7 +1266,7 @@ var UndoService = class {
     const backups = await this.backupManager.listBackups();
     const noteName = lastOp.noteTitle;
     const recentBackup = backups.find(
-      (b) => b.originalFile === noteName && b.createdAt.getTime() <= lastOp.timestamp
+      (b) => (b.originalPath === lastOp.notePath || !b.originalPath && b.originalFile === noteName) && b.createdAt.getTime() <= lastOp.timestamp
     );
     if (!recentBackup) {
       new import_obsidian5.Notice("\u672A\u627E\u5230\u5907\u4EFD\u6587\u4EF6");
@@ -1269,7 +1295,7 @@ var UndoService = class {
     const backups = await this.backupManager.listBackups();
     const noteName = entry.noteTitle;
     const backup = backups.find(
-      (b) => b.originalFile === noteName && Math.abs(b.createdAt.getTime() - entry.timestamp) < 6e4
+      (b) => (b.originalPath === entry.notePath || !b.originalPath && b.originalFile === noteName) && Math.abs(b.createdAt.getTime() - entry.timestamp) < 6e4
       // Within 1 minute
     );
     if (!backup) {
@@ -2269,10 +2295,11 @@ var ActionHandler = class {
           tokensUsed: (_a = response.tokensUsed) == null ? void 0 : _a.total
         };
       }
-      const file = this.app.vault.getAbstractFileByPath(context.notePath);
+      const file = this.getTargetFile(context.notePath);
       let outputPath;
       if (context.isSelection && outputMode === "selection") {
-        await this.replaceSelection(response.content);
+        await this.backupService.backup(file);
+        await this.replaceSelection(context, response.content);
       } else {
         switch (outputMode) {
           case "append":
@@ -2321,11 +2348,12 @@ var ActionHandler = class {
   async applyResult(actionType, context, output, customPrompt) {
     const timestamp = Date.now();
     try {
-      const file = this.app.vault.getAbstractFileByPath(context.notePath);
+      const file = this.getTargetFile(context.notePath);
       let outputPath;
       const outputMode = (customPrompt == null ? void 0 : customPrompt.outputMode) || this.getDefaultOutputMode(actionType, context.isSelection);
       if (context.isSelection && outputMode === "selection") {
-        await this.replaceSelection(output);
+        await this.backupService.backup(file);
+        await this.replaceSelection(context, output);
       } else {
         switch (outputMode) {
           case "append":
@@ -2366,20 +2394,28 @@ var ActionHandler = class {
   /**
    * Replace selected text in the editor
    */
-  async replaceSelection(newContent) {
+  async replaceSelection(context, newContent) {
+    var _a;
     const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
-    if (!view) {
-      throw new Error("\u65E0\u6CD5\u83B7\u53D6\u7F16\u8F91\u5668");
+    if (!view || ((_a = view.file) == null ? void 0 : _a.path) !== context.notePath) {
+      throw new Error("\u539F\u7B14\u8BB0\u5DF2\u4E0D\u5728\u6D3B\u52A8\u7F16\u8F91\u5668\u4E2D\uFF0C\u8BF7\u91CD\u65B0\u6267\u884C\u64CD\u4F5C");
     }
     const editor = view.editor;
-    if (!editor) {
+    if (!editor || !context.selectionFrom || !context.selectionTo) {
       throw new Error("\u7F16\u8F91\u5668\u4E0D\u53EF\u7528");
     }
-    const selection = editor.getSelection();
-    if (!selection) {
-      throw new Error("\u6CA1\u6709\u9009\u4E2D\u7684\u6587\u672C");
+    const currentText = editor.getRange(context.selectionFrom, context.selectionTo);
+    if (currentText !== context.selectedText) {
+      throw new Error("\u539F\u9009\u533A\u5DF2\u53D1\u751F\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u6267\u884C\u64CD\u4F5C");
     }
-    editor.replaceSelection(newContent);
+    editor.replaceRange(newContent, context.selectionFrom, context.selectionTo);
+  }
+  getTargetFile(notePath) {
+    const file = this.app.vault.getAbstractFileByPath(notePath);
+    if (!(file instanceof import_obsidian8.TFile)) {
+      throw new Error("\u76EE\u6807\u7B14\u8BB0\u4E0D\u5B58\u5728");
+    }
+    return file;
   }
   getPrompt(actionType, customPrompt) {
     if (actionType === "custom" && customPrompt) {
@@ -2393,6 +2429,7 @@ var ActionHandler = class {
     }
     switch (actionType) {
       case "summarize":
+        return this.settings.output.summaryPosition;
       case "outline":
       case "mindmap":
       case "mermaid":
@@ -2902,6 +2939,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     this.customPromptsService.updateSettings(this.settings.customPrompts);
     this.shortcutsService.updateSettings(this.settings.shortcuts);
     this.contextMenuService.updateSettings(this.settings.contextMenu);
+    this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
   }
   /**
    * Get services
@@ -3057,13 +3095,15 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       noteContent: content,
       noteTitle: file.basename,
       selectedText,
+      selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
+      selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
       isSelection
     };
     const actionName = this.getActionName(actionType);
     this.statusBarService.setProcessing(actionName);
     new import_obsidian10.Notice(`\u6B63\u5728\u5904\u7406: ${actionName}...`);
     const previewMode = this.settings.ui.confirmBeforeReplace;
-    const result = await this.actionHandler.execute(actionType, context, void 0, { previewOnly: previewMode });
+    const result = await this.actionHandler.execute(actionType, context, void 0, { previewOnly: true });
     if (result.success && result.output) {
       this.statusBarService.setCompleted(result.tokensUsed);
       if (previewMode) {
@@ -3083,15 +3123,10 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
           }
         );
       } else {
-        if (!result.outputPath) {
-          const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
-          if (applyResult.success) {
-            new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
-            this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-          }
-        } else {
+        const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
+        if (applyResult.success) {
           new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
-          this.addToHistory(actionType, actionName, file, result, isSelection);
+          this.addToHistory(actionType, actionName, file, applyResult, isSelection);
           await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
             prompt: 0,
             completion: 0,
@@ -3131,6 +3166,8 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       noteContent: content,
       noteTitle: file.basename,
       selectedText,
+      selectionFrom: isSelection ? this.getSelectionPosition("from") : void 0,
+      selectionTo: isSelection ? this.getSelectionPosition("to") : void 0,
       isSelection
     };
     this.statusBarService.setProcessing(prompt.name);
@@ -3220,6 +3257,10 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       return void 0;
     const selection = editor.getSelection();
     return selection || void 0;
+  }
+  getSelectionPosition(which) {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    return view == null ? void 0 : view.editor.getCursor(which);
   }
   /**
    * Get display name for action

@@ -2,7 +2,7 @@
  * Shortcuts Service - Manage keyboard shortcuts
  */
 
-import { App, Plugin, Keymap } from 'obsidian';
+import { App, Plugin } from 'obsidian';
 import { ShortcutSettings, ShortcutBinding } from '../types';
 
 export class ShortcutsService {
@@ -10,6 +10,7 @@ export class ShortcutsService {
     private plugin: Plugin;
     private settings: ShortcutSettings;
     private registeredShortcuts: Map<string, () => void> = new Map();
+    private keydownHandlers: Set<(evt: KeyboardEvent) => void> = new Set();
 
     constructor(app: App, plugin: Plugin, settings: ShortcutSettings) {
         this.app = app;
@@ -41,13 +42,15 @@ export class ShortcutsService {
         const key = this.getShortcutKey(binding);
 
         // Use Obsidian's built-in keymap system
-        this.plugin.registerDomEvent(document, 'keydown', (evt: KeyboardEvent) => {
+        const handler = (evt: KeyboardEvent) => {
             if (this.matchesBinding(evt, binding)) {
                 evt.preventDefault();
                 evt.stopPropagation();
                 executeAction(binding.actionId, binding.customPromptId);
             }
-        });
+        };
+        document.addEventListener('keydown', handler);
+        this.keydownHandlers.add(handler);
 
         this.registeredShortcuts.set(key, () => executeAction(binding.actionId, binding.customPromptId));
     }
@@ -83,6 +86,10 @@ export class ShortcutsService {
      * Clear all registered shortcuts
      */
     clearAll() {
+        for (const handler of this.keydownHandlers) {
+            document.removeEventListener('keydown', handler);
+        }
+        this.keydownHandlers.clear();
         this.registeredShortcuts.clear();
     }
 

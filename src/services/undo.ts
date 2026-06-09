@@ -38,7 +38,8 @@ export class UndoService {
         const backups = await this.backupManager.listBackups();
         const noteName = lastOp.noteTitle;
         const recentBackup = backups.find(b =>
-            b.originalFile === noteName &&
+            (b.originalPath === lastOp.notePath ||
+                (!b.originalPath && b.originalFile === noteName)) &&
             b.createdAt.getTime() <= lastOp.timestamp
         );
 
@@ -76,7 +77,8 @@ export class UndoService {
         const backups = await this.backupManager.listBackups();
         const noteName = entry.noteTitle;
         const backup = backups.find(b =>
-            b.originalFile === noteName &&
+            (b.originalPath === entry.notePath ||
+                (!b.originalPath && b.originalFile === noteName)) &&
             Math.abs(b.createdAt.getTime() - entry.timestamp) < 60000 // Within 1 minute
         );
 

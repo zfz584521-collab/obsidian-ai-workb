@@ -201,6 +201,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.customPromptsService.updateSettings(this.settings.customPrompts);
         this.shortcutsService.updateSettings(this.settings.shortcuts);
         this.contextMenuService.updateSettings(this.settings.contextMenu);
+        this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
     }
 
     /**
@@ -371,6 +372,8 @@ export default class AIWorkbenchPlugin extends Plugin {
             noteContent: content,
             noteTitle: file.basename,
             selectedText,
+            selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
+            selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
             isSelection
         };
 
@@ -381,8 +384,8 @@ export default class AIWorkbenchPlugin extends Plugin {
         // Check if preview mode is enabled
         const previewMode = this.settings.ui.confirmBeforeReplace;
 
-        // Execute with preview option if enabled
-        const result = await this.actionHandler.execute(actionType, context, undefined, { previewOnly: previewMode });
+        // Generate first and apply exactly once after optional confirmation.
+        const result = await this.actionHandler.execute(actionType, context, undefined, { previewOnly: true });
 
         if (result.success && result.output) {
             this.statusBarService.setCompleted(result.tokensUsed);
@@ -406,16 +409,10 @@ export default class AIWorkbenchPlugin extends Plugin {
                     }
                 );
             } else {
-                // Apply directly if not in preview mode
-                if (!result.outputPath) {
-                    const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
-                    if (applyResult.success) {
-                        new Notice(`${actionName} 完成`);
-                        this.addToHistory(actionType, actionName, file, applyResult, isSelection);
-                    }
-                } else {
+                const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
+                if (applyResult.success) {
                     new Notice(`${actionName} 完成`);
-                    this.addToHistory(actionType, actionName, file, result, isSelection);
+                    this.addToHistory(actionType, actionName, file, applyResult, isSelection);
                     await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
                         prompt: 0,
                         completion: 0,
@@ -460,6 +457,8 @@ export default class AIWorkbenchPlugin extends Plugin {
             noteContent: content,
             noteTitle: file.basename,
             selectedText,
+            selectionFrom: isSelection ? this.getSelectionPosition('from') : undefined,
+            selectionTo: isSelection ? this.getSelectionPosition('to') : undefined,
             isSelection
         };
 
@@ -560,6 +559,11 @@ export default class AIWorkbenchPlugin extends Plugin {
 
         const selection = editor.getSelection();
         return selection || undefined;
+    }
+
+    private getSelectionPosition(which: 'from' | 'to'): { line: number; ch: number } | undefined {
+        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        return view?.editor.getCursor(which);
     }
 
     /**
