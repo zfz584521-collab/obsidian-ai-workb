@@ -42,6 +42,10 @@ stats.json
 .superpowers/
 tests/
 
+# Release packages
+*.zip
+release/
+
 # Temporary files
 *.tmp
 *.temp
