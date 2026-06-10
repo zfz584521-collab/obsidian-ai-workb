@@ -42,24 +42,92 @@
 
 /* Category section in sidebar */
 .ai-workbench-category {
+    --category-accent: var(--text-muted);
+    position: relative;
+    overflow: hidden;
+    padding: 12px 10px 10px 14px;
     margin-bottom: 16px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+}
+
+.ai-workbench-category::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 3px;
+    background: var(--category-accent);
+}
+
+.ai-workbench-category--basic {
+    --category-accent: hsl(218, 70%, 62%);
+}
+
+.ai-workbench-category--xiaohongshu {
+    --category-accent: hsl(347, 68%, 62%);
+}
+
+.ai-workbench-category--video {
+    --category-accent: hsl(277, 58%, 64%);
+}
+
+.ai-workbench-category--wechat {
+    --category-accent: hsl(148, 44%, 50%);
+}
+
+.ai-workbench-category--translate {
+    --category-accent: hsl(188, 52%, 52%);
+}
+
+.ai-workbench-category--code {
+    --category-accent: hsl(31, 68%, 58%);
+}
+
+.ai-workbench-category--other,
+.ai-workbench-category--uncategorized {
+    --category-accent: var(--text-muted);
 }
 
 .ai-workbench-category-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--background-modifier-border);
 }
 
 .ai-workbench-category-header .category-title {
     font-size: 14px;
     font-weight: 600;
+    color: var(--category-accent);
+}
+
+.ai-workbench-category-header .category-count {
+    min-width: 22px;
+    padding: 1px 7px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
     color: var(--text-muted);
+    font-size: 11px;
+    line-height: 18px;
+    text-align: center;
 }
 
 .ai-workbench-action-btn.custom {
-    background: var(--background-secondary);
-    border-style: dashed;
+    min-height: 42px;
+    padding: 9px 10px;
+    background: var(--interactive-normal);
+    border-style: solid;
+    line-height: 1.3;
+    white-space: normal;
+}
+
+.ai-workbench-category .ai-workbench-buttons {
+    margin-bottom: 0;
 }
 
 .ai-workbench-buttons {

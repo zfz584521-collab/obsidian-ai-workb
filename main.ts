@@ -764,6 +764,11 @@ class WorkbenchView extends ItemView {
             const grouped = this.groupByCategory(customPrompts);
 
             for (const [categoryId, prompts] of grouped) {
+                const categoryClass = categoryId
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-]/g, '-')
+                    .replace(/-+/g, '-')
+                    .replace(/^-|-$/g, '') || 'uncategorized';
                 const category = PRESET_CATEGORIES.find(c => c.id === categoryId) || {
                     id: categoryId,
                     name: categoryId === 'uncategorized' ? '未分类' : categoryId,
@@ -771,12 +776,18 @@ class WorkbenchView extends ItemView {
                     description: ''
                 };
 
-                const categoryContainer = container.createDiv({ cls: 'ai-workbench-category' });
+                const categoryContainer = container.createDiv({
+                    cls: `ai-workbench-category ai-workbench-category--${categoryClass}`
+                });
 
                 const header = categoryContainer.createDiv({ cls: 'ai-workbench-category-header' });
                 header.createEl('span', {
                     text: `${category.icon} ${category.name}`,
                     cls: 'category-title'
+                });
+                header.createEl('span', {
+                    text: String(prompts.length),
+                    cls: 'category-count'
                 });
 
                 const buttonsContainer = categoryContainer.createDiv({ cls: 'ai-workbench-buttons' });

@@ -36,6 +36,12 @@ build/
 .obsidian/
 data.json
 
+# Plugin runtime files
+backups/
+stats.json
+.superpowers/
+tests/
+
 # Temporary files
 *.tmp
 *.temp

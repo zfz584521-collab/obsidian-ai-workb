@@ -3562,17 +3562,24 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
     if (customPrompts.length > 0) {
       const grouped = this.groupByCategory(customPrompts);
       for (const [categoryId, prompts] of grouped) {
+        const categoryClass = categoryId.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "uncategorized";
         const category = PRESET_CATEGORIES.find((c) => c.id === categoryId) || {
           id: categoryId,
           name: categoryId === "uncategorized" ? "\u672A\u5206\u7C7B" : categoryId,
           icon: "\u{1F4CC}",
           description: ""
         };
-        const categoryContainer = container.createDiv({ cls: "ai-workbench-category" });
+        const categoryContainer = container.createDiv({
+          cls: `ai-workbench-category ai-workbench-category--${categoryClass}`
+        });
         const header2 = categoryContainer.createDiv({ cls: "ai-workbench-category-header" });
         header2.createEl("span", {
           text: `${category.icon} ${category.name}`,
           cls: "category-title"
+        });
+        header2.createEl("span", {
+          text: String(prompts.length),
+          cls: "category-count"
         });
         const buttonsContainer2 = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
         for (const prompt of prompts) {
