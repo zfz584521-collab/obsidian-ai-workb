@@ -370,3 +370,11 @@ export interface IHelpService {
      */
     showShortcutsHelp(shortcuts: Array<{ key: string; action: string }>): void;
 }
+
+/**
+ * Obsidian publishing content extractor interface
+ */
+export interface IObsidianContentExtractor {
+    extract(file: import('obsidian').TFile): Promise<import('./publishing/types').PublishContent>;
+    loadMedia(media: import('./publishing/types').PublishMedia): Promise<import('./publishing/types').PublishMedia>;
+}
