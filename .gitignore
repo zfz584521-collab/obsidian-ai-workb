@@ -50,8 +50,8 @@ release/
 *.tmp
 *.temp
 .cache/
+.worktrees/
 
 # Test coverage
 coverage/
 .nyc_output/
-
