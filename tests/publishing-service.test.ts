@@ -227,3 +227,27 @@ test('an adapter exception does not cancel other platforms', async () => {
     assert.equal(result.results.wechat?.success, true);
     assert.equal(result.results.x?.error?.code, 'ADAPTER_ERROR');
 });
+
+test('platform requests respect the configured timeout', async () => {
+    const adapter = new FakeAdapter('wechat', [success('wechat')]);
+    adapter.createDraft = async () => {
+        adapter.createCalls += 1;
+        return new Promise<PlatformPublishResult>(() => {});
+    };
+    const settings = mergePublishingSettings({
+        requestTimeout: 0.001,
+        platforms: { wechat: { enabled: true } }
+    });
+    const service = new PublishingService(
+        settings,
+        { create: () => adapter },
+        async () => {},
+        async () => {},
+        [],
+        () => 'task-timeout'
+    );
+
+    const result = await service.publishAll(inputFor(['wechat']));
+    assert.equal(result.results.wechat?.error?.code, 'REQUEST_TIMEOUT');
+    assert.equal(adapter.createCalls, 3);
+});

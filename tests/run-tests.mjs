@@ -11,6 +11,9 @@ await mkdir(outdir, { recursive: true });
 const entries = (await readdir('tests'))
     .filter(name => name.endsWith('.test.ts'))
     .map(name => path.join('tests', name));
+const sourceTests = (await readdir('tests'))
+    .filter(name => name.endsWith('.test.mjs'))
+    .map(name => path.join('tests', name));
 
 await build({
     entryPoints: entries,
@@ -25,5 +28,9 @@ const testFiles = (await readdir(outdir))
     .filter(name => name.endsWith('.js'))
     .map(name => path.join(outdir, name));
 
-const result = spawnSync(process.execPath, ['--test', ...testFiles], { stdio: 'inherit' });
+const result = spawnSync(
+    process.execPath,
+    ['--test', ...testFiles, ...sourceTests],
+    { stdio: 'inherit' }
+);
 process.exit(result.status ?? 1);

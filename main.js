@@ -4299,7 +4299,11 @@ var PublishingService = class {
       return { success: false, message: "\u8BF7\u5148\u542F\u7528\u8BE5\u53D1\u5E03\u5E73\u53F0" };
     }
     try {
-      return await this.adapterFactory.create(platform, settings).testConnection();
+      return await withTimeout(
+        this.adapterFactory.create(platform, settings).testConnection(),
+        this.settings.requestTimeout * 1e3,
+        { success: false, message: "\u5E73\u53F0\u8FDE\u63A5\u6D4B\u8BD5\u8D85\u65F6" }
+      );
     } catch (e) {
       return { success: false, message: "\u5E73\u53F0\u8FDE\u63A5\u6D4B\u8BD5\u5931\u8D25" };
     }
@@ -4382,7 +4386,16 @@ var PublishingService = class {
       );
     }
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const result = await adapter.createDraft(request);
+      const result = await withTimeout(
+        adapter.createDraft(request),
+        this.settings.requestTimeout * 1e3,
+        platformFailure(
+          request.platform,
+          "REQUEST_TIMEOUT",
+          "\u5E73\u53F0\u8BF7\u6C42\u8D85\u65F6",
+          true
+        )
+      );
       if (result.success || !((_a = result.error) == null ? void 0 : _a.retryable) || attempt === MAX_RETRIES) {
         return result;
       }
@@ -4461,6 +4474,21 @@ function platformFailure(platform, code, message, retryable, field) {
     success: false,
     error: { code, message, retryable, field }
   };
+}
+function withTimeout(promise, timeoutMs, fallback) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(fallback), Math.max(1, timeoutMs));
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 // src/publishing/modal.ts
@@ -4769,10 +4797,22 @@ var PublishEditorModal = class extends import_obsidian12.Modal {
   async retryFailed() {
     if (!this.lastResult)
       return;
+    const previous = this.lastResult;
     this.submitting = true;
     this.render();
     try {
-      this.lastResult = await this.publishingService.retryFailed(this.lastResult);
+      const retried = await this.publishingService.retryFailed(previous);
+      const results = { ...previous.results, ...retried.results };
+      const successCount = previous.platforms.filter((platform) => {
+        var _a;
+        return (_a = results[platform]) == null ? void 0 : _a.success;
+      }).length;
+      this.lastResult = {
+        ...previous,
+        requests: { ...previous.requests, ...retried.requests },
+        results,
+        status: successCount === previous.platforms.length ? "success" : successCount > 0 ? "partial" : "failed"
+      };
       new import_obsidian12.Notice(resultNotice(this.lastResult));
     } finally {
       this.submitting = false;

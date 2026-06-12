@@ -419,10 +419,22 @@ export class PublishEditorModal extends Modal {
 
     private async retryFailed(): Promise<void> {
         if (!this.lastResult) return;
+        const previous = this.lastResult;
         this.submitting = true;
         this.render();
         try {
-            this.lastResult = await this.publishingService.retryFailed(this.lastResult);
+            const retried = await this.publishingService.retryFailed(previous);
+            const results = { ...previous.results, ...retried.results };
+            const successCount = previous.platforms
+                .filter(platform => results[platform]?.success).length;
+            this.lastResult = {
+                ...previous,
+                requests: { ...previous.requests, ...retried.requests },
+                results,
+                status: successCount === previous.platforms.length
+                    ? 'success'
+                    : successCount > 0 ? 'partial' : 'failed'
+            };
             new Notice(resultNotice(this.lastResult));
         } finally {
             this.submitting = false;

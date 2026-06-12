@@ -86,7 +86,11 @@ export class PublishingService {
             return { success: false, message: '请先启用该发布平台' };
         }
         try {
-            return await this.adapterFactory.create(platform, settings).testConnection();
+            return await withTimeout(
+                this.adapterFactory.create(platform, settings).testConnection(),
+                this.settings.requestTimeout * 1000,
+                { success: false, message: '平台连接测试超时' }
+            );
         } catch {
             return { success: false, message: '平台连接测试失败' };
         }
@@ -181,7 +185,16 @@ export class PublishingService {
         }
 
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            const result = await adapter.createDraft(request);
+            const result = await withTimeout(
+                adapter.createDraft(request),
+                this.settings.requestTimeout * 1000,
+                platformFailure(
+                    request.platform,
+                    'REQUEST_TIMEOUT',
+                    '平台请求超时',
+                    true
+                )
+            );
             if (result.success || !result.error?.retryable || attempt === MAX_RETRIES) {
                 return result;
             }
@@ -273,4 +286,20 @@ function platformFailure(
         success: false,
         error: { code, message, retryable, field }
     };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(fallback), Math.max(1, timeoutMs));
+        promise.then(
+            value => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            error => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
 }

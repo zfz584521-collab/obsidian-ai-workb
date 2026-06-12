@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Multi-platform publishing
+
+- Added draft publishing for WeChat Official Account, Xiaohongshu, WeChat Channels, Douyin, X, and YouTube.
+- Added shared content editing, per-platform overrides, media selection, partial-failure results, and failed-only retry.
+- Added direct WeChat draft creation and YouTube private uploads.
+- Added a signed Webhook contract for all six platforms.
+- Platform credentials remain local but are not encrypted by default.
+
 ### Added
 - 待添加的新功能
 
