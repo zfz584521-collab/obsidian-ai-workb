@@ -29,6 +29,21 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian10 = require("obsidian");
 
+// src/wechat-images/types.ts
+var DEFAULT_IMAGE_SETTINGS = {
+  provider: "openai-compatible",
+  endpoint: "https://api.openai.com/v1",
+  apiKey: "",
+  model: "gpt-image-1",
+  size: "1536x1024",
+  timeout: 120,
+  retryCount: 2,
+  concurrency: 2,
+  maxImages: 10,
+  previewTasks: false,
+  keepOriginalPrompts: false
+};
+
 // src/types/index.ts
 var DEFAULT_SETTINGS = {
   api: {
@@ -38,6 +53,7 @@ var DEFAULT_SETTINGS = {
     timeout: 60,
     headers: {}
   },
+  images: { ...DEFAULT_IMAGE_SETTINGS },
   output: {
     summaryPosition: "append",
     language: "auto",
@@ -2663,6 +2679,57 @@ var WorkbenchSettingTab = class extends import_obsidian9.PluginSettingTab {
       this.plugin.settings.api.timeout = value;
       await this.plugin.saveSettings();
     }));
+    containerEl.createEl("h2", { text: "\u56FE\u7247\u751F\u6210" });
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247\u63D0\u4F9B\u5546").setDesc("\u9996\u7248\u652F\u6301 OpenAI \u517C\u5BB9\u56FE\u7247 API").addDropdown((dropdown) => dropdown.addOption("openai-compatible", "OpenAI \u517C\u5BB9 API").setValue(this.plugin.settings.images.provider).onChange(async (value) => {
+      this.plugin.settings.images.provider = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247 API \u7AEF\u70B9").setDesc("\u4E0E\u6587\u672C AI \u72EC\u7ACB\u914D\u7F6E\uFF0C\u652F\u6301 HTTPS \u6216\u672C\u5730 HTTP \u670D\u52A1").addText((text) => text.setPlaceholder("https://api.openai.com/v1").setValue(this.plugin.settings.images.endpoint).onChange((0, import_obsidian9.debounce)(async (value) => {
+      if (value && !this.validateEndpoint(value)) {
+        new import_obsidian9.Notice("\u56FE\u7247 API \u7AEF\u70B9\u5FC5\u987B\u662F\u6709\u6548\u7684 HTTPS URL\uFF08\u672C\u5730\u53EF\u4F7F\u7528 HTTP\uFF09");
+        return;
+      }
+      this.plugin.settings.images.endpoint = value;
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247 API Key").setDesc("\u4EC5\u4FDD\u5B58\u5728\u672C\u5730\u63D2\u4EF6\u8BBE\u7F6E\u4E2D").addText((text) => text.setPlaceholder("sk-...").setValue(this.maskApiKey(this.plugin.settings.images.apiKey)).onChange((0, import_obsidian9.debounce)(async (value) => {
+      if (value.includes("..."))
+        return;
+      this.plugin.settings.images.apiKey = value;
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247\u6A21\u578B").addText((text) => text.setPlaceholder("gpt-image-1").setValue(this.plugin.settings.images.model).onChange((0, import_obsidian9.debounce)(async (value) => {
+      this.plugin.settings.images.model = value.trim();
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247\u5C3A\u5BF8").setDesc("\u7531\u56FE\u7247\u670D\u52A1\u652F\u6301\uFF0C\u4F8B\u5982 1536x1024").addText((text) => text.setPlaceholder("1536x1024").setValue(this.plugin.settings.images.size).onChange((0, import_obsidian9.debounce)(async (value) => {
+      this.plugin.settings.images.size = value.trim();
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian9.Setting(containerEl).setName("\u56FE\u7247\u8BF7\u6C42\u8D85\u65F6").setDesc("\u5355\u4F4D\uFF1A\u79D2").addSlider((slider) => slider.setLimits(30, 300, 10).setValue(this.plugin.settings.images.timeout).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.images.timeout = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u5931\u8D25\u91CD\u8BD5\u6B21\u6570").addSlider((slider) => slider.setLimits(0, 5, 1).setValue(this.plugin.settings.images.retryCount).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.images.retryCount = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u5E76\u53D1\u751F\u6210\u6570\u91CF").addSlider((slider) => slider.setLimits(1, 5, 1).setValue(this.plugin.settings.images.concurrency).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.images.concurrency = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u5355\u7BC7\u6700\u591A\u56FE\u7247\u6570").addSlider((slider) => slider.setLimits(1, 10, 1).setValue(this.plugin.settings.images.maxImages).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.images.maxImages = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u751F\u6210\u524D\u9884\u89C8\u63D0\u793A\u8BCD").addToggle((toggle) => toggle.setValue(this.plugin.settings.images.previewTasks).onChange(async (value) => {
+      this.plugin.settings.images.previewTasks = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian9.Setting(containerEl).setName("\u4FDD\u7559\u539F\u914D\u56FE\u63D0\u793A\u8BCD").setDesc("\u5173\u95ED\u65F6\uFF0C\u6210\u529F\u751F\u6210\u7684\u56FE\u7247\u4F1A\u66FF\u6362\u539F\u914D\u56FE\u533A\u5757").addToggle((toggle) => toggle.setValue(this.plugin.settings.images.keepOriginalPrompts).onChange(async (value) => {
+      this.plugin.settings.images.keepOriginalPrompts = value;
+      await this.plugin.saveSettings();
+    }));
     containerEl.createEl("h2", { text: "\u8F93\u51FA\u8BBE\u7F6E" });
     new import_obsidian9.Setting(containerEl).setName("\u603B\u7ED3\u4F4D\u7F6E").setDesc("AI \u751F\u6210\u7684\u603B\u7ED3\u6DFB\u52A0\u5230\u7B14\u8BB0\u7684\u4F4D\u7F6E").addDropdown((dropdown) => dropdown.addOption("append", "\u8FFD\u52A0\u5230\u672B\u5C3E").addOption("prepend", "\u63D2\u5165\u5230\u5F00\u5934").addOption("newFile", "\u65B0\u5EFA\u6587\u4EF6").setValue(this.plugin.settings.output.summaryPosition).onChange(async (value) => {
       this.plugin.settings.output.summaryPosition = value;
@@ -3112,6 +3179,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     const saved = await this.loadData();
     this.settings = {
       api: { ...DEFAULT_SETTINGS.api, ...saved == null ? void 0 : saved.api },
+      images: { ...DEFAULT_SETTINGS.images, ...saved == null ? void 0 : saved.images },
       output: { ...DEFAULT_SETTINGS.output, ...saved == null ? void 0 : saved.output },
       backup: { ...DEFAULT_SETTINGS.backup, ...saved == null ? void 0 : saved.backup },
       claudian: { ...DEFAULT_SETTINGS.claudian, ...saved == null ? void 0 : saved.claudian },
@@ -3122,6 +3190,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     };
   }
   async saveSettings() {
+    var _a;
     await this.saveData(this.settings);
     this.aiService.updateSettings(this.settings.api);
     this.backupService.updateSettings(this.settings.backup);
@@ -3130,6 +3199,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     this.shortcutsService.updateSettings(this.settings.shortcuts);
     this.contextMenuService.updateSettings(this.settings.contextMenu);
     this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
+    (_a = this.weChatImageWorkflow) == null ? void 0 : _a.updateSettings(this.settings.images);
   }
   /**
    * Get services

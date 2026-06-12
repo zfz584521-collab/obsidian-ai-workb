@@ -32,6 +32,7 @@ import { getCategorizedPresets, PRESET_CATEGORIES, PresetCategory } from './src/
 import { ActionHandler } from './src/actions';
 import { WorkbenchSettingTab } from './src/settings';
 import { MAX_HISTORY_ENTRIES } from './src/constants';
+import type { WeChatImageWorkflow } from './src/wechat-images/workflow';
 
 const VIEW_TYPE = 'ai-workbench-view';
 
@@ -51,6 +52,7 @@ export default class AIWorkbenchPlugin extends Plugin {
     private statisticsService: StatisticsService;
     private helpService: HelpService;
     private actionHandler: ActionHandler;
+    private weChatImageWorkflow?: WeChatImageWorkflow;
     private history: HistoryEntry[] = [];
     private isProcessing: boolean = false; // Lock to prevent concurrent operations
 
@@ -185,6 +187,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         const saved = await this.loadData();
         this.settings = {
             api: { ...DEFAULT_SETTINGS.api, ...saved?.api },
+            images: { ...DEFAULT_SETTINGS.images, ...saved?.images },
             output: { ...DEFAULT_SETTINGS.output, ...saved?.output },
             backup: { ...DEFAULT_SETTINGS.backup, ...saved?.backup },
             claudian: { ...DEFAULT_SETTINGS.claudian, ...saved?.claudian },
@@ -204,6 +207,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.shortcutsService.updateSettings(this.settings.shortcuts);
         this.contextMenuService.updateSettings(this.settings.contextMenu);
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
+        this.weChatImageWorkflow?.updateSettings(this.settings.images);
     }
 
     /**

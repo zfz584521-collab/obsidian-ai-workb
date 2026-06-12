@@ -85,6 +85,132 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        // Image Generation Settings
+        containerEl.createEl('h2', { text: '图片生成' });
+
+        new Setting(containerEl)
+            .setName('图片提供商')
+            .setDesc('首版支持 OpenAI 兼容图片 API')
+            .addDropdown(dropdown => dropdown
+                .addOption('openai-compatible', 'OpenAI 兼容 API')
+                .setValue(this.plugin.settings.images.provider)
+                .onChange(async (value: 'openai-compatible') => {
+                    this.plugin.settings.images.provider = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('图片 API 端点')
+            .setDesc('与文本 AI 独立配置，支持 HTTPS 或本地 HTTP 服务')
+            .addText(text => text
+                .setPlaceholder('https://api.openai.com/v1')
+                .setValue(this.plugin.settings.images.endpoint)
+                .onChange(debounce(async (value: string) => {
+                    if (value && !this.validateEndpoint(value)) {
+                        new Notice('图片 API 端点必须是有效的 HTTPS URL（本地可使用 HTTP）');
+                        return;
+                    }
+                    this.plugin.settings.images.endpoint = value;
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName('图片 API Key')
+            .setDesc('仅保存在本地插件设置中')
+            .addText(text => text
+                .setPlaceholder('sk-...')
+                .setValue(this.maskApiKey(this.plugin.settings.images.apiKey))
+                .onChange(debounce(async (value: string) => {
+                    if (value.includes('...')) return;
+                    this.plugin.settings.images.apiKey = value;
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName('图片模型')
+            .addText(text => text
+                .setPlaceholder('gpt-image-1')
+                .setValue(this.plugin.settings.images.model)
+                .onChange(debounce(async (value: string) => {
+                    this.plugin.settings.images.model = value.trim();
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName('图片尺寸')
+            .setDesc('由图片服务支持，例如 1536x1024')
+            .addText(text => text
+                .setPlaceholder('1536x1024')
+                .setValue(this.plugin.settings.images.size)
+                .onChange(debounce(async (value: string) => {
+                    this.plugin.settings.images.size = value.trim();
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName('图片请求超时')
+            .setDesc('单位：秒')
+            .addSlider(slider => slider
+                .setLimits(30, 300, 10)
+                .setValue(this.plugin.settings.images.timeout)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.images.timeout = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('失败重试次数')
+            .addSlider(slider => slider
+                .setLimits(0, 5, 1)
+                .setValue(this.plugin.settings.images.retryCount)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.images.retryCount = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('并发生成数量')
+            .addSlider(slider => slider
+                .setLimits(1, 5, 1)
+                .setValue(this.plugin.settings.images.concurrency)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.images.concurrency = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('单篇最多图片数')
+            .addSlider(slider => slider
+                .setLimits(1, 10, 1)
+                .setValue(this.plugin.settings.images.maxImages)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.images.maxImages = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('生成前预览提示词')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.images.previewTasks)
+                .onChange(async value => {
+                    this.plugin.settings.images.previewTasks = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('保留原配图提示词')
+            .setDesc('关闭时，成功生成的图片会替换原配图区块')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.images.keepOriginalPrompts)
+                .onChange(async value => {
+                    this.plugin.settings.images.keepOriginalPrompts = value;
+                    await this.plugin.saveSettings();
+                }));
+
         // Output Settings
         containerEl.createEl('h2', { text: '输出设置' });
 

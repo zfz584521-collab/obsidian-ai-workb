@@ -2,6 +2,11 @@
  * AI Workbench - Type Definitions
  */
 
+import {
+    DEFAULT_IMAGE_SETTINGS,
+    ImageGenerationSettings
+} from '../wechat-images/types';
+
 // ============ Settings ============
 
 export interface ApiSettings {
@@ -84,6 +89,7 @@ export interface UISettings {
 
 export interface WorkbenchSettings {
     api: ApiSettings;
+    images: ImageGenerationSettings;
     output: OutputSettings;
     backup: BackupSettings;
     claudian: ClaudianSettings;
@@ -176,6 +182,7 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         timeout: 60,
         headers: {}
     },
+    images: { ...DEFAULT_IMAGE_SETTINGS },
     output: {
         summaryPosition: 'append',
         language: 'auto',
