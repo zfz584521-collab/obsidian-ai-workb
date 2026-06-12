@@ -26,7 +26,7 @@ interface WorkflowApp {
     };
     vault: {
         read(file: WorkflowFile): Promise<string>;
-        createFolder(path: string): Promise<void>;
+        createFolder(path: string): Promise<unknown>;
         create(path: string, content: string): Promise<any>;
         adapter: {
             exists(path: string): Promise<boolean>;
@@ -140,7 +140,9 @@ export class WeChatImageWorkflow {
 
             const writer = new ImageOutputWriter({
                 exists: path => this.app.vault.adapter.exists(path),
-                createFolder: path => this.app.vault.createFolder(path),
+                createFolder: async path => {
+                    await this.app.vault.createFolder(path);
+                },
                 writeBinary: (path, data) =>
                     this.app.vault.adapter.writeBinary(path, data),
                 createMarkdown: (path, content) =>

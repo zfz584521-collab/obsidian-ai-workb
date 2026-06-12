@@ -18,7 +18,7 @@ test('sidebar renders stable category classes and action counts', () => {
     );
     assert.match(
         mainSource,
-        /text:\s*String\(prompts\.length\)/,
+        /text:\s*String\(prompts\.length\s*\+/,
         'the count should reflect the prompts in the category'
     );
 });

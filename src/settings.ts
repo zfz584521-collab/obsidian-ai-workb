@@ -705,6 +705,7 @@ class ShortcutModal extends Modal {
                 dropdown.addOption('format', '格式化');
                 dropdown.addOption('mindmap', '思维导图');
                 dropdown.addOption('mermaid', 'Mermaid 思维导图');
+                dropdown.addOption('wechat-insert-images', '公众号一键插入图片');
 
                 for (const prompt of this.customPrompts) {
                     dropdown.addOption(`custom:${prompt.id}`, `自定义: ${prompt.name}`);

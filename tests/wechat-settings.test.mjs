@@ -13,7 +13,7 @@ test('persists image settings with safe defaults', async () => {
     assert.equal(DEFAULT_SETTINGS.images.provider, 'openai-compatible');
     assert.equal(DEFAULT_SETTINGS.images.maxImages, 10);
     assert.match(mainSource, /images:\s*\{\s*\.\.\.DEFAULT_SETTINGS\.images,\s*\.\.\.saved\?\.images\s*\}/s);
-    assert.match(mainSource, /weChatImageWorkflow\?\.updateSettings\(this\.settings\.images\)/);
+    assert.match(mainSource, /weChatImageWorkflow(?:\?\.)?\.?updateSettings\(this\.settings\.images\)/);
 });
 
 test('renders every required image setting control', () => {

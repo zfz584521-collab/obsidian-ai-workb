@@ -32,7 +32,8 @@ import { getCategorizedPresets, PRESET_CATEGORIES, PresetCategory } from './src/
 import { ActionHandler } from './src/actions';
 import { WorkbenchSettingTab } from './src/settings';
 import { MAX_HISTORY_ENTRIES } from './src/constants';
-import type { WeChatImageWorkflow } from './src/wechat-images/workflow';
+import { WeChatImageWorkflow } from './src/wechat-images/workflow';
+import { ImageTaskPreviewService } from './src/wechat-images/task-preview';
 
 const VIEW_TYPE = 'ai-workbench-view';
 
@@ -52,7 +53,7 @@ export default class AIWorkbenchPlugin extends Plugin {
     private statisticsService: StatisticsService;
     private helpService: HelpService;
     private actionHandler: ActionHandler;
-    private weChatImageWorkflow?: WeChatImageWorkflow;
+    private weChatImageWorkflow: WeChatImageWorkflow;
     private history: HistoryEntry[] = [];
     private isProcessing: boolean = false; // Lock to prevent concurrent operations
 
@@ -79,6 +80,14 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.fileService,
             this.settings
         );
+        this.weChatImageWorkflow = new WeChatImageWorkflow(
+            this.app,
+            this.aiService,
+            this.fileService,
+            this.statusBarService,
+            new ImageTaskPreviewService(this.app),
+            this.settings.images
+        );
 
         // Context menu
         this.contextMenuService = new ContextMenuService(
@@ -87,7 +96,8 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.settings.contextMenu,
             (action, isSelection) => this.executeAction(action, isSelection),
             (id) => this.executeCustomPrompt(id),
-            () => this.customPromptsService.getAll()
+            () => this.customPromptsService.getAll(),
+            (file) => this.executeWeChatImageInsertion(file)
         );
 
         // Register view
@@ -107,6 +117,11 @@ export default class AIWorkbenchPlugin extends Plugin {
 
         // Add commands for quick actions
         this.addActionCommands();
+        this.addCommand({
+            id: 'wechat-insert-images',
+            name: '公众号一键插入图片',
+            callback: () => this.executeWeChatImageInsertion()
+        });
 
         // Add backup management command
         this.addCommand({
@@ -207,7 +222,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.shortcutsService.updateSettings(this.settings.shortcuts);
         this.contextMenuService.updateSettings(this.settings.contextMenu);
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
-        this.weChatImageWorkflow?.updateSettings(this.settings.images);
+        this.weChatImageWorkflow.updateSettings(this.settings.images);
     }
 
     /**
@@ -265,7 +280,9 @@ export default class AIWorkbenchPlugin extends Plugin {
     refreshShortcuts() {
         this.shortcutsService.clearAll();
         this.shortcutsService.registerAll((actionId, customPromptId) => {
-            if (actionId === 'custom' && customPromptId) {
+            if (actionId === 'wechat-insert-images') {
+                this.executeWeChatImageInsertion();
+            } else if (actionId === 'custom' && customPromptId) {
                 this.executeCustomPrompt(customPromptId);
             } else {
                 this.executeAction(actionId as ActionType);
@@ -513,6 +530,29 @@ export default class AIWorkbenchPlugin extends Plugin {
         }
     }
 
+    async executeWeChatImageInsertion(file?: TFile): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.weChatImageWorkflow.run(file);
+            if (result.cancelled) {
+                new Notice('已取消公众号配图');
+            } else if (result.success) {
+                new Notice(
+                    `配图完成：成功 ${result.successCount || 0} 张，失败 ${result.failureCount || 0} 张`
+                );
+            } else {
+                new Notice(`配图失败：${result.error || '未知错误'}`);
+            }
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
     /**
      * Get action display name
      */
@@ -523,6 +563,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         }
 
         const names: Record<string, string> = {
+            'wechat-insert-images': '公众号一键插入图片',
             summarize: '总结',
             outline: '大纲',
             translate: '翻译',
@@ -764,10 +805,13 @@ class WorkbenchView extends ItemView {
 
         // Custom Prompts - grouped by category
         const customPrompts = this.plugin.getCustomPromptsService().getAll();
+        let renderedWeChatImageAction = false;
         if (customPrompts.length > 0) {
             const grouped = this.groupByCategory(customPrompts);
 
             for (const [categoryId, prompts] of grouped) {
+                const isWeChatCategory = categoryId === 'wechat';
+                if (isWeChatCategory) renderedWeChatImageAction = true;
                 const categoryClass = categoryId
                     .toLowerCase()
                     .replace(/[^a-z0-9-]/g, '-')
@@ -790,7 +834,7 @@ class WorkbenchView extends ItemView {
                     cls: 'category-title'
                 });
                 header.createEl('span', {
-                    text: String(prompts.length),
+                    text: String(prompts.length + (isWeChatCategory ? 1 : 0)),
                     cls: 'category-count'
                 });
 
@@ -805,7 +849,34 @@ class WorkbenchView extends ItemView {
                         this.plugin.executeCustomPrompt(prompt.id);
                     });
                 }
+
+                if (isWeChatCategory) {
+                    const imageButton = buttonsContainer.createEl('button', {
+                        cls: 'ai-workbench-action-btn custom ai-workbench-wechat-images',
+                        text: '公众号一键插入图片'
+                    });
+                    imageButton.addEventListener('click', () => {
+                        this.plugin.executeWeChatImageInsertion();
+                    });
+                }
             }
+        }
+
+        if (!renderedWeChatImageAction) {
+            const categoryContainer = container.createDiv({
+                cls: 'ai-workbench-category ai-workbench-category--wechat'
+            });
+            const header = categoryContainer.createDiv({ cls: 'ai-workbench-category-header' });
+            header.createEl('span', { text: '📰 公众号', cls: 'category-title' });
+            header.createEl('span', { text: '1', cls: 'category-count' });
+            const imageButtons = categoryContainer.createDiv({ cls: 'ai-workbench-buttons' });
+            const imageButton = imageButtons.createEl('button', {
+                cls: 'ai-workbench-action-btn custom ai-workbench-wechat-images',
+                text: '公众号一键插入图片'
+            });
+            imageButton.addEventListener('click', () => {
+                this.plugin.executeWeChatImageInsertion();
+            });
         }
 
         // Claudian section

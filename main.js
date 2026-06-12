@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AIWorkbenchPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/wechat-images/types.ts
 var DEFAULT_IMAGE_SETTINGS = {
@@ -711,6 +711,13 @@ var BackupListModal = class extends import_obsidian2.Modal {
 var import_obsidian3 = require("obsidian");
 
 // src/wechat-images/output-writer.ts
+var OutputWriteError = class extends Error {
+  constructor(message, assetDirPath) {
+    super(message);
+    this.assetDirPath = assetDirPath;
+    this.name = "OutputWriteError";
+  }
+};
 function normalizePath2(path) {
   return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "");
 }
@@ -734,6 +741,63 @@ async function resolveIllustratedOutputPaths(originalPath, exists, maxAttempts =
   }
   throw new Error("\u65E0\u6CD5\u521B\u5EFA\u914D\u56FE\u6587\u7AE0\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A");
 }
+function exactArrayBuffer(bytes) {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  );
+}
+var ImageOutputWriter = class {
+  constructor(vault) {
+    this.vault = vault;
+  }
+  resolve(originalPath) {
+    return resolveIllustratedOutputPaths(
+      originalPath,
+      (path) => this.vault.exists(path)
+    );
+  }
+  async saveImages(output, results) {
+    let directoryCreated = false;
+    const saved = [];
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (!result.image) {
+        saved.push({ ...result });
+        continue;
+      }
+      try {
+        if (!directoryCreated) {
+          await this.vault.createFolder(output.assetDirPath);
+          directoryCreated = true;
+        }
+        const filename = `image-${String(index + 1).padStart(2, "0")}.${result.image.extension}`;
+        const assetPath = joinPath(output.assetDirPath, filename);
+        await this.vault.writeBinary(
+          assetPath,
+          exactArrayBuffer(result.image.bytes)
+        );
+        saved.push({ ...result, assetPath });
+      } catch (error) {
+        saved.push({
+          task: result.task,
+          error: error instanceof Error ? error.message : "\u56FE\u7247\u4FDD\u5B58\u5931\u8D25"
+        });
+      }
+    }
+    return saved;
+  }
+  async createArticle(output, content) {
+    try {
+      return await this.vault.createMarkdown(output.articlePath, content);
+    } catch (e) {
+      throw new OutputWriteError(
+        `\u65B0\u6587\u7AE0\u521B\u5EFA\u5931\u8D25\uFF0C\u5DF2\u751F\u6210\u56FE\u7247\u4FDD\u7559\u5728 ${output.assetDirPath}`,
+        output.assetDirPath
+      );
+    }
+  }
+};
 
 // src/services/file.ts
 var FileService = class {
@@ -1217,13 +1281,14 @@ var ShortcutsService = class {
 
 // src/services/context-menu.ts
 var ContextMenuService = class {
-  constructor(app, plugin, settings, executeAction, executeCustomPrompt, getCustomPrompts) {
+  constructor(app, plugin, settings, executeAction, executeCustomPrompt, getCustomPrompts, executeWeChatImages) {
     this.app = app;
     this.plugin = plugin;
     this.settings = settings;
     this.executeAction = executeAction;
     this.executeCustomPrompt = executeCustomPrompt;
     this.getCustomPrompts = getCustomPrompts;
+    this.executeWeChatImages = executeWeChatImages;
   }
   updateSettings(settings) {
     this.settings = settings;
@@ -1257,6 +1322,7 @@ var ContextMenuService = class {
       item.setTitle("AI \u5DE5\u4F5C\u53F0").setIcon("sparkles").onClick(() => {
       });
     });
+    menu.addItem((item) => item.setTitle("\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247").setIcon("image-plus").onClick(() => this.executeWeChatImages()));
     if (this.settings.showBuiltInActions) {
       const actions = [
         { type: "summarize", label: "\u603B\u7ED3" },
@@ -1297,6 +1363,7 @@ var ContextMenuService = class {
       item.setTitle("AI \u5DE5\u4F5C\u53F0").setIcon("sparkles").onClick(() => {
       });
     });
+    menu.addItem((item) => item.setTitle("\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247").setIcon("image-plus").onClick(() => this.executeWeChatImages(file)));
     if (this.settings.showBuiltInActions) {
       const actions = [
         { type: "summarize", label: "\u603B\u7ED3" },
@@ -2997,6 +3064,7 @@ var ShortcutModal = class extends import_obsidian9.Modal {
       dropdown.addOption("format", "\u683C\u5F0F\u5316");
       dropdown.addOption("mindmap", "\u601D\u7EF4\u5BFC\u56FE");
       dropdown.addOption("mermaid", "Mermaid \u601D\u7EF4\u5BFC\u56FE");
+      dropdown.addOption("wechat-insert-images", "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247");
       for (const prompt of this.customPrompts) {
         dropdown.addOption(`custom:${prompt.id}`, `\u81EA\u5B9A\u4E49: ${prompt.name}`);
       }
@@ -3078,9 +3146,682 @@ var ImportPromptsModal = class extends import_obsidian9.Modal {
   }
 };
 
+// src/wechat-images/prompt-parser.ts
+var EMOJI_PREFIX = String.raw`(?:\p{Extended_Pictographic}\uFE0F?\s*)?`;
+var EMPHASIS = String.raw`(?:[*_]{1,3}\s*)?`;
+var PROMPT_LINE = new RegExp(
+  String.raw`^\s*${EMOJI_PREFIX}${EMPHASIS}(AI(?:绘图|生图)?提示词)\s*${EMPHASIS}[:：]\s*(.*?)\s*$`,
+  "u"
+);
+var DESCRIPTION_LINE = new RegExp(
+  String.raw`^\s*${EMOJI_PREFIX}${EMPHASIS}图片描述\s*${EMPHASIS}[:：]\s*(.*?)\s*$`,
+  "u"
+);
+var PLACEMENT_LINE = new RegExp(
+  String.raw`^\s*${EMOJI_PREFIX}${EMPHASIS}(?:放置位置|配图位置|位置)\s*${EMPHASIS}[:：].*$`,
+  "u"
+);
+var IMAGE_BLOCK_LINE = /^\s*(?:[*_]{1,3}\s*)?【\s*配图[^】]*】\s*(?:[*_]{1,3})?\s*$/u;
+var HEADING_LINE = /^\s{0,3}#{1,6}(?:\s+|$)/;
+function splitSourceLines(source) {
+  const lines = [];
+  const linePattern = /([^\r\n]*)(?:\r\n|\n|\r|$)/g;
+  let match;
+  while ((match = linePattern.exec(source)) !== null) {
+    if (match[0].length === 0) {
+      break;
+    }
+    lines.push({
+      text: match[1],
+      startOffset: match.index,
+      endOffset: match.index + match[1].length
+    });
+  }
+  return lines;
+}
+function extractValue(value) {
+  const trimmed = value.trim();
+  return trimmed.replace(/[*_\s]/g, "") ? trimmed : void 0;
+}
+function findBlockStart(lines, promptIndex) {
+  let startIndex = promptIndex;
+  for (let index = promptIndex - 1; index >= 0; index--) {
+    const text = lines[index].text;
+    if (!text.trim() || HEADING_LINE.test(text)) {
+      break;
+    }
+    if (IMAGE_BLOCK_LINE.test(text)) {
+      return index;
+    }
+    if (DESCRIPTION_LINE.test(text) || PLACEMENT_LINE.test(text)) {
+      startIndex = index;
+      continue;
+    }
+    break;
+  }
+  return startIndex;
+}
+function findBlockEnd(lines, promptIndex) {
+  let endIndex = promptIndex;
+  for (let index = promptIndex + 1; index < lines.length; index++) {
+    const text = lines[index].text;
+    if (!text.trim() || HEADING_LINE.test(text)) {
+      break;
+    }
+    if (!DESCRIPTION_LINE.test(text) && !PLACEMENT_LINE.test(text)) {
+      break;
+    }
+    endIndex = index;
+  }
+  return endIndex;
+}
+function findDescription(lines, startIndex, endIndex) {
+  for (let index = startIndex; index <= endIndex; index++) {
+    const match = DESCRIPTION_LINE.exec(lines[index].text);
+    if (match) {
+      return extractValue(match[1]);
+    }
+  }
+  return void 0;
+}
+function parseExistingImageTasks(source) {
+  const lines = splitSourceLines(source);
+  const tasks = [];
+  for (let index = 0; index < lines.length; index++) {
+    const match = PROMPT_LINE.exec(lines[index].text);
+    const prompt = match ? extractValue(match[2]) : void 0;
+    if (!prompt) {
+      continue;
+    }
+    const startIndex = findBlockStart(lines, index);
+    const endIndex = findBlockEnd(lines, index);
+    tasks.push({
+      id: `existing-${String(tasks.length + 1).padStart(2, "0")}`,
+      prompt,
+      description: findDescription(lines, startIndex, endIndex),
+      sourceBlock: {
+        startOffset: lines[startIndex].startOffset,
+        endOffset: lines[endIndex].endOffset
+      },
+      anchor: { placement: "after" }
+    });
+  }
+  return tasks;
+}
+
+// src/wechat-images/task-extractor.ts
+var TASK_PROMPT = `\u8BF7\u4E3A\u4EE5\u4E0B\u516C\u4F17\u53F7\u6587\u7AE0\u89C4\u5212 3-5 \u5F20\u914D\u56FE\u3002
+\u53EA\u8FD4\u56DE JSON\uFF0C\u4E0D\u8981\u6DFB\u52A0\u89E3\u91CA\u6216 Markdown \u4EE3\u7801\u56F4\u680F\u3002\u683C\u5F0F\u5FC5\u987B\u4E3A\uFF1A
+{"tasks":[{"prompt":"English image generation prompt","description":"\u4E2D\u6587\u56FE\u7247\u63CF\u8FF0","anchor":{"heading":"\u6587\u7AE0\u4E2D\u5B8C\u5168\u4E00\u81F4\u7684\u6807\u9898\u6587\u672C\uFF0C\u4E0D\u542B #","nearbyText":"\u4ECE\u6587\u7AE0\u4E2D\u590D\u5236\u7684\u7B80\u77ED\u539F\u6587","placement":"before \u6216 after"}}]}
+\u8981\u6C42\uFF1A
+1. heading \u548C nearbyText \u5FC5\u987B\u9010\u5B57\u590D\u5236\u6587\u7AE0\u539F\u6587\u3002
+2. \u6BCF\u4E2A\u4EFB\u52A1\u81F3\u5C11\u63D0\u4F9B heading \u6216 nearbyText\u3002
+3. prompt \u5FC5\u987B\u5177\u4F53\uFF0C\u5305\u542B\u4E3B\u4F53\u3001\u6784\u56FE\u3001\u98CE\u683C\u3001\u8272\u8C03\u548C\u6A2A\u7248\u6BD4\u4F8B\u3002
+4. \u4E0D\u8981\u751F\u6210\u91CD\u590D\u4EFB\u52A1\u3002`;
+function stripCodeFence(value) {
+  const trimmed = value.trim();
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  return match ? match[1].trim() : trimmed;
+}
+function nonEmptyString(value) {
+  if (typeof value !== "string")
+    return void 0;
+  const trimmed = value.trim();
+  return trimmed || void 0;
+}
+function parseAnchor(value) {
+  if (!value || value.placement !== "before" && value.placement !== "after") {
+    return void 0;
+  }
+  const heading = nonEmptyString(value.heading);
+  const nearbyText = nonEmptyString(value.nearbyText);
+  if (!heading && !nearbyText)
+    return void 0;
+  return {
+    ...heading ? { heading } : {},
+    ...nearbyText ? { nearbyText } : {},
+    placement: value.placement
+  };
+}
+var ImageTaskExtractor = class {
+  constructor(textClient, maxImages) {
+    this.textClient = textClient;
+    this.maxImages = maxImages;
+  }
+  async extract(source) {
+    const existing = parseExistingImageTasks(source);
+    if (existing.length > 0)
+      return existing;
+    const raw = await this.textClient.completeJson(TASK_PROMPT, source);
+    let parsed;
+    try {
+      parsed = JSON.parse(stripCodeFence(raw));
+    } catch (e) {
+      throw new Error("\u6587\u672C AI \u8FD4\u56DE\u7684\u914D\u56FE\u4EFB\u52A1\u4E0D\u662F\u6709\u6548 JSON");
+    }
+    if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) {
+      throw new Error("\u6587\u672C AI \u672A\u8FD4\u56DE\u6709\u6548\u914D\u56FE\u4EFB\u52A1");
+    }
+    if (parsed.tasks.length > this.maxImages) {
+      throw new Error(`\u5355\u7BC7\u6587\u7AE0\u6700\u591A\u751F\u6210 ${this.maxImages} \u5F20\u56FE\u7247`);
+    }
+    const tasks = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const [index, value] of parsed.tasks.entries()) {
+      if (!value || typeof value !== "object") {
+        throw new Error("\u6587\u672C AI \u8FD4\u56DE\u4E86\u65E0\u6548\u914D\u56FE\u4EFB\u52A1");
+      }
+      const taskValue = value;
+      const prompt = nonEmptyString(taskValue.prompt);
+      const description = nonEmptyString(taskValue.description);
+      const anchor = parseAnchor(taskValue.anchor);
+      if (!prompt || !anchor) {
+        throw new Error("\u6587\u672C AI \u8FD4\u56DE\u4E86\u65E0\u6548\u914D\u56FE\u4EFB\u52A1");
+      }
+      const duplicateKey = JSON.stringify([prompt, anchor]);
+      if (seen.has(duplicateKey)) {
+        throw new Error("\u6587\u672C AI \u8FD4\u56DE\u4E86\u91CD\u590D\u914D\u56FE\u4EFB\u52A1");
+      }
+      seen.add(duplicateKey);
+      tasks.push({
+        id: `generated-${String(index + 1).padStart(2, "0")}`,
+        prompt,
+        ...description ? { description } : {},
+        anchor
+      });
+    }
+    return tasks;
+  }
+};
+
+// src/wechat-images/image-provider.ts
+var MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+var ALLOWED_MIME_TYPES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp"]);
+var ImageProviderError = class extends Error {
+  constructor(message, retryable, status) {
+    super(message);
+    this.retryable = retryable;
+    this.status = status;
+    this.name = "ImageProviderError";
+  }
+};
+function validateUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch (e) {
+    throw new ImageProviderError("\u56FE\u7247 API \u5730\u5740\u683C\u5F0F\u65E0\u6548", false);
+  }
+  const localhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && localhost)) {
+    throw new ImageProviderError("\u56FE\u7247\u5730\u5740\u5FC5\u987B\u4F7F\u7528 HTTPS\uFF0C\u672C\u5730\u670D\u52A1\u9664\u5916", false);
+  }
+  return url;
+}
+function decodeBase64(value) {
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  } catch (e) {
+    throw new ImageProviderError("\u56FE\u7247\u6570\u636E\u4E0D\u662F\u6709\u6548\u7684 base64", false);
+  }
+}
+function detectImage(bytes) {
+  if (bytes.length >= 4 && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71) {
+    return { bytes, extension: "png", mimeType: "image/png" };
+  }
+  if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
+    return { bytes, extension: "jpg", mimeType: "image/jpeg" };
+  }
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") {
+    return { bytes, extension: "webp", mimeType: "image/webp" };
+  }
+  return void 0;
+}
+function normalizeImage(bytes, declaredMime) {
+  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) {
+    throw new ImageProviderError("\u56FE\u7247\u6570\u636E\u5927\u5C0F\u65E0\u6548", false);
+  }
+  if (declaredMime && !ALLOWED_MIME_TYPES.has(declaredMime)) {
+    throw new ImageProviderError("\u56FE\u7247 MIME \u7C7B\u578B\u4E0D\u53D7\u652F\u6301", false);
+  }
+  const image = detectImage(bytes);
+  if (!image || declaredMime && image.mimeType !== declaredMime) {
+    throw new ImageProviderError("\u56FE\u7247\u683C\u5F0F\u6821\u9A8C\u5931\u8D25", false);
+  }
+  return image;
+}
+function requestError(status) {
+  const retryable = status === 429 || status >= 500;
+  const messages = {
+    400: "\u56FE\u7247\u751F\u6210\u8BF7\u6C42\u53C2\u6570\u65E0\u6548",
+    401: "\u56FE\u7247 API Key \u65E0\u6548\u6216\u5DF2\u8FC7\u671F",
+    403: "\u6CA1\u6709\u6743\u9650\u8C03\u7528\u56FE\u7247 API",
+    404: "\u56FE\u7247 API \u5730\u5740\u4E0D\u5B58\u5728",
+    429: "\u56FE\u7247\u751F\u6210\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41"
+  };
+  return new ImageProviderError(
+    messages[status] || (retryable ? "\u56FE\u7247\u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528" : `\u56FE\u7247\u8BF7\u6C42\u5931\u8D25: ${status}`),
+    retryable,
+    status
+  );
+}
+var OpenAICompatibleImageProvider = class {
+  constructor(settings, fetchFn = fetch) {
+    this.settings = settings;
+    this.fetchFn = fetchFn;
+  }
+  async generate(request) {
+    var _a;
+    const endpoint = validateUrl(this.settings.endpoint);
+    const url = `${endpoint.toString().replace(/\/$/, "")}/images/generations`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.settings.timeout * 1e3
+    );
+    try {
+      const response = await this.fetchFn(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.settings.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.settings.model,
+          prompt: request.prompt,
+          size: request.size,
+          response_format: "b64_json"
+        }),
+        signal: controller.signal
+      });
+      if (!response.ok)
+        throw requestError(response.status);
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        throw new ImageProviderError("\u56FE\u7247 API \u8FD4\u56DE\u7684 JSON \u65E0\u6548", false);
+      }
+      const item = (_a = data == null ? void 0 : data.data) == null ? void 0 : _a[0];
+      if (typeof (item == null ? void 0 : item.b64_json) === "string") {
+        return normalizeImage(decodeBase64(item.b64_json));
+      }
+      if (typeof (item == null ? void 0 : item.url) === "string") {
+        return await this.downloadImage(item.url, controller.signal);
+      }
+      throw new ImageProviderError("\u56FE\u7247 API \u8FD4\u56DE\u683C\u5F0F\u65E0\u6548", false);
+    } catch (error) {
+      if (error instanceof ImageProviderError)
+        throw error;
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new ImageProviderError("\u56FE\u7247\u751F\u6210\u8BF7\u6C42\u8D85\u65F6", true);
+      }
+      throw new ImageProviderError("\u56FE\u7247\u670D\u52A1\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25", true);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  async downloadImage(urlValue, signal) {
+    var _a;
+    const url = validateUrl(urlValue);
+    const response = await this.fetchFn(url.toString(), { signal });
+    if (!response.ok)
+      throw requestError(response.status);
+    const mimeType = (_a = response.headers.get("content-type")) == null ? void 0 : _a.split(";", 1)[0].trim();
+    if (!mimeType) {
+      throw new ImageProviderError("\u56FE\u7247\u54CD\u5E94\u7F3A\u5C11 MIME \u7C7B\u578B", false);
+    }
+    const buffer = await response.arrayBuffer();
+    return normalizeImage(new Uint8Array(buffer), mimeType);
+  }
+};
+
+// src/wechat-images/generation-coordinator.ts
+function sanitizeError(error) {
+  const message = error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF";
+  return message.split(/\r?\n/, 1)[0].replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[REDACTED]").slice(0, 160);
+}
+var ImageGenerationCoordinator = class {
+  constructor(provider, concurrency, retryCount) {
+    this.provider = provider;
+    this.workerCount = Math.max(1, Math.min(5, Math.floor(concurrency) || 1));
+    this.retries = Math.max(0, Math.floor(retryCount) || 0);
+  }
+  async generateAll(tasks, size, onProgress) {
+    const results = new Array(tasks.length);
+    let nextIndex = 0;
+    let completed = 0;
+    const worker = async () => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= tasks.length)
+          return;
+        const task = tasks[index];
+        try {
+          results[index] = {
+            task,
+            image: await this.generateWithRetry(task, size)
+          };
+        } catch (error) {
+          results[index] = {
+            task,
+            error: sanitizeError(error)
+          };
+        }
+        completed += 1;
+        onProgress(completed, tasks.length);
+      }
+    };
+    const count = Math.min(this.workerCount, tasks.length);
+    await Promise.all(Array.from({ length: count }, () => worker()));
+    return results;
+  }
+  async generateWithRetry(task, size) {
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      try {
+        return await this.provider.generate({ prompt: task.prompt, size });
+      } catch (error) {
+        const retryable = error instanceof ImageProviderError && error.retryable;
+        if (!retryable || attempt === this.retries)
+          throw error;
+      }
+    }
+    throw new Error("\u56FE\u7247\u751F\u6210\u5931\u8D25");
+  }
+};
+
+// src/wechat-images/article-renderer.ts
+function escapeMarkdown(value) {
+  return value.replace(/[\\*_`[\]]/g, "\\$&").replace(/\r?\n/g, " ").trim();
+}
+function safeError(value) {
+  const firstLine = (value || "\u672A\u77E5\u9519\u8BEF").split(/\r?\n/, 1)[0];
+  return firstLine.replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[REDACTED]").slice(0, 160);
+}
+function imageBlock(result) {
+  const embed = `![[${result.assetPath}]]`;
+  return result.task.description ? `${embed}
+
+*${escapeMarkdown(result.task.description)}*` : embed;
+}
+function failureBlock(result, includePrompt) {
+  const lines = [
+    "> [!warning] \u914D\u56FE\u751F\u6210\u5931\u8D25",
+    `> \u672C\u4F4D\u7F6E\u7684\u56FE\u7247\u672A\u751F\u6210\u6210\u529F\uFF1A${safeError(result.error)}`
+  ];
+  if (includePrompt) {
+    lines.push(`> \u63D0\u793A\u8BCD\uFF1A${escapeMarkdown(result.task.prompt)}`);
+  }
+  return lines.join("\n");
+}
+function findHeading(source, heading) {
+  const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`^\\s{0,3}#{1,6}\\s+${escaped}\\s*$`, "gm");
+  const match = pattern.exec(source);
+  if (!match)
+    return void 0;
+  return { start: match.index, end: match.index + match[0].length };
+}
+function findAnchorPosition(source, anchor) {
+  let rangeStart = 0;
+  let rangeEnd = source.length;
+  let headingMatch;
+  if (anchor.heading) {
+    headingMatch = findHeading(source, anchor.heading);
+    if (!headingMatch)
+      return void 0;
+    rangeStart = headingMatch.end;
+    const nextHeading = /^(\s{0,3}#{1,6})(?:\s+|$)/gm;
+    nextHeading.lastIndex = rangeStart;
+    const next = nextHeading.exec(source);
+    rangeEnd = next ? next.index : source.length;
+  }
+  if (anchor.nearbyText) {
+    const excerptIndex = source.indexOf(anchor.nearbyText, rangeStart);
+    if (excerptIndex === -1 || excerptIndex >= rangeEnd)
+      return void 0;
+    return anchor.placement === "before" ? excerptIndex : excerptIndex + anchor.nearbyText.length;
+  }
+  if (!headingMatch)
+    return void 0;
+  return anchor.placement === "before" ? headingMatch.start : headingMatch.end;
+}
+function withSpacing(content) {
+  return `
+
+${content}
+
+`;
+}
+function renderIllustratedArticle(source, results, options) {
+  const edits = [];
+  const fallback = [];
+  results.forEach((result, order) => {
+    const success = !!result.assetPath;
+    const rendered = success ? imageBlock(result) : failureBlock(result, !result.task.sourceBlock);
+    const sourceBlock = result.task.sourceBlock;
+    if (sourceBlock) {
+      if (sourceBlock.startOffset < 0 || sourceBlock.endOffset < sourceBlock.startOffset || sourceBlock.endOffset > source.length) {
+        fallback.push(rendered);
+        return;
+      }
+      if (success && !options.keepOriginalPrompts) {
+        edits.push({
+          start: sourceBlock.startOffset,
+          end: sourceBlock.endOffset,
+          content: rendered,
+          order
+        });
+      } else {
+        edits.push({
+          start: sourceBlock.endOffset,
+          end: sourceBlock.endOffset,
+          content: withSpacing(rendered),
+          order
+        });
+      }
+      return;
+    }
+    const position = findAnchorPosition(source, result.task.anchor);
+    if (position === void 0) {
+      fallback.push(rendered);
+      return;
+    }
+    edits.push({
+      start: position,
+      end: position,
+      content: withSpacing(rendered),
+      order
+    });
+  });
+  edits.sort(
+    (left, right) => right.start - left.start || right.order - left.order
+  );
+  let output = source;
+  for (const edit of edits) {
+    output = output.slice(0, edit.start) + edit.content + output.slice(edit.end);
+  }
+  if (fallback.length > 0) {
+    output = `${output.trimEnd()}
+
+## \u914D\u56FE
+
+${fallback.join("\n\n")}
+`;
+  }
+  return output;
+}
+
+// src/wechat-images/workflow.ts
+function validateSettings(settings) {
+  let url;
+  try {
+    url = new URL(settings.endpoint);
+  } catch (e) {
+    throw new Error("\u56FE\u7247 API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+  }
+  const localhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && localhost)) {
+    throw new Error("\u56FE\u7247 API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF0C\u672C\u5730\u670D\u52A1\u9664\u5916");
+  }
+  if (!settings.apiKey.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247 API Key");
+  if (!settings.model.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247\u6A21\u578B");
+  if (!settings.size.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247\u5C3A\u5BF8");
+  if (settings.maxImages < 1 || settings.maxImages > 10) {
+    throw new Error("\u5355\u7BC7\u56FE\u7247\u6570\u91CF\u5FC5\u987B\u5728 1 \u5230 10 \u4E4B\u95F4");
+  }
+}
+var WeChatImageWorkflow = class {
+  constructor(app, textClient, fileService, status, preview, settings, providerFactory = (value) => new OpenAICompatibleImageProvider(value)) {
+    this.app = app;
+    this.textClient = textClient;
+    this.fileService = fileService;
+    this.status = status;
+    this.preview = preview;
+    this.settings = settings;
+    this.providerFactory = providerFactory;
+    this.running = false;
+  }
+  updateSettings(settings) {
+    this.settings = { ...settings };
+  }
+  async run(file) {
+    if (this.running) {
+      return { success: false, error: "\u516C\u4F17\u53F7\u914D\u56FE\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
+    }
+    this.running = true;
+    try {
+      const target = file || this.app.workspace.getActiveFile();
+      if (!target || target.extension !== "md") {
+        throw new Error("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u6587\u7AE0");
+      }
+      const source = await this.app.vault.read(target);
+      if (!source.trim())
+        throw new Error("\u6587\u7AE0\u5185\u5BB9\u4E3A\u7A7A");
+      validateSettings(this.settings);
+      this.status.setProcessing("\u6B63\u5728\u5206\u6790\u516C\u4F17\u53F7\u914D\u56FE");
+      const extractor = new ImageTaskExtractor(
+        this.textClient,
+        this.settings.maxImages
+      );
+      const tasks = await extractor.extract(source);
+      if (this.settings.previewTasks && !await this.preview.confirm(tasks)) {
+        this.status.setCompleted();
+        return { success: false, cancelled: true };
+      }
+      const output = await this.fileService.resolveIllustratedOutput(target);
+      const coordinator = new ImageGenerationCoordinator(
+        this.providerFactory(this.settings),
+        this.settings.concurrency,
+        this.settings.retryCount
+      );
+      const generated = await coordinator.generateAll(
+        tasks,
+        this.settings.size,
+        (completed, total) => this.status.setProgress("\u6B63\u5728\u751F\u6210", completed, total)
+      );
+      const writer = new ImageOutputWriter({
+        exists: (path) => this.app.vault.adapter.exists(path),
+        createFolder: async (path) => {
+          await this.app.vault.createFolder(path);
+        },
+        writeBinary: (path, data) => this.app.vault.adapter.writeBinary(path, data),
+        createMarkdown: (path, content2) => this.app.vault.create(path, content2)
+      });
+      const saved = await writer.saveImages(output, generated);
+      const content = renderIllustratedArticle(source, saved, {
+        keepOriginalPrompts: this.settings.keepOriginalPrompts
+      });
+      const newFile = await writer.createArticle(output, content);
+      await this.app.workspace.getLeaf().openFile(newFile);
+      const successCount = saved.filter((result) => !!result.assetPath).length;
+      const failureCount = saved.length - successCount;
+      this.status.setCompleted();
+      return {
+        success: true,
+        successCount,
+        failureCount,
+        outputPath: output.articlePath
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u516C\u4F17\u53F7\u914D\u56FE\u5931\u8D25";
+      this.status.setError(message);
+      return { success: false, error: message };
+    } finally {
+      this.running = false;
+    }
+  }
+};
+
+// src/wechat-images/task-preview.ts
+var import_obsidian10 = require("obsidian");
+var ImageTaskPreviewService = class {
+  constructor(app) {
+    this.app = app;
+  }
+  confirm(tasks) {
+    return new Promise((resolve) => {
+      new ImageTaskPreviewModal(this.app, tasks, resolve).open();
+    });
+  }
+};
+var ImageTaskPreviewModal = class extends import_obsidian10.Modal {
+  constructor(app, tasks, resolveResult) {
+    super(app);
+    this.tasks = tasks;
+    this.resolveResult = resolveResult;
+    this.resolved = false;
+  }
+  onOpen() {
+    this.contentEl.addClass("ai-workbench-image-task-preview");
+    this.contentEl.createEl("h2", { text: `\u786E\u8BA4\u914D\u56FE\u4EFB\u52A1\uFF08${this.tasks.length} \u5F20\uFF09` });
+    for (const [index, task] of this.tasks.entries()) {
+      const item = this.contentEl.createDiv({ cls: "ai-workbench-image-task" });
+      item.createEl("h3", {
+        text: `${index + 1}. ${task.description || "\u6587\u7AE0\u914D\u56FE"}`
+      });
+      item.createEl("div", {
+        cls: "ai-workbench-image-task__prompt",
+        text: task.prompt
+      });
+      item.createEl("div", {
+        cls: "ai-workbench-image-task__anchor",
+        text: [
+          task.anchor.heading ? `\u6807\u9898\uFF1A${task.anchor.heading}` : "",
+          task.anchor.nearbyText ? `\u539F\u6587\uFF1A${task.anchor.nearbyText}` : "",
+          `\u4F4D\u7F6E\uFF1A${task.anchor.placement === "before" ? "\u4E4B\u524D" : "\u4E4B\u540E"}`
+        ].filter(Boolean).join("\uFF1B")
+      });
+    }
+    new import_obsidian10.Setting(this.contentEl).addButton((button) => button.setButtonText("\u53D6\u6D88").onClick(() => this.finish(false))).addButton((button) => button.setButtonText("\u5F00\u59CB\u751F\u6210").setCta().onClick(() => this.finish(true)));
+  }
+  onClose() {
+    this.contentEl.empty();
+    if (!this.resolved) {
+      this.resolved = true;
+      this.resolveResult(false);
+    }
+  }
+  finish(accepted) {
+    if (this.resolved)
+      return;
+    this.resolved = true;
+    this.resolveResult(accepted);
+    this.close();
+  }
+};
+
 // main.ts
 var VIEW_TYPE = "ai-workbench-view";
-var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
+var AIWorkbenchPlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
     this.history = [];
@@ -3108,13 +3849,22 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       this.fileService,
       this.settings
     );
+    this.weChatImageWorkflow = new WeChatImageWorkflow(
+      this.app,
+      this.aiService,
+      this.fileService,
+      this.statusBarService,
+      new ImageTaskPreviewService(this.app),
+      this.settings.images
+    );
     this.contextMenuService = new ContextMenuService(
       this.app,
       this,
       this.settings.contextMenu,
       (action, isSelection) => this.executeAction(action, isSelection),
       (id) => this.executeCustomPrompt(id),
-      () => this.customPromptsService.getAll()
+      () => this.customPromptsService.getAll(),
+      (file) => this.executeWeChatImageInsertion(file)
     );
     this.registerView(VIEW_TYPE, (leaf) => new WorkbenchView(leaf, this));
     this.addRibbonIcon("sparkles", "AI Workbench", () => {
@@ -3126,6 +3876,11 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       callback: () => this.activateView()
     });
     this.addActionCommands();
+    this.addCommand({
+      id: "wechat-insert-images",
+      name: "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247",
+      callback: () => this.executeWeChatImageInsertion()
+    });
     this.addCommand({
       id: "manage-backups",
       name: "Manage Backups",
@@ -3190,7 +3945,6 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     };
   }
   async saveSettings() {
-    var _a;
     await this.saveData(this.settings);
     this.aiService.updateSettings(this.settings.api);
     this.backupService.updateSettings(this.settings.backup);
@@ -3199,7 +3953,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     this.shortcutsService.updateSettings(this.settings.shortcuts);
     this.contextMenuService.updateSettings(this.settings.contextMenu);
     this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
-    (_a = this.weChatImageWorkflow) == null ? void 0 : _a.updateSettings(this.settings.images);
+    this.weChatImageWorkflow.updateSettings(this.settings.images);
   }
   /**
    * Get services
@@ -3237,7 +3991,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       summary,
       async () => {
         await this.statisticsService.reset();
-        new import_obsidian10.Notice("\u7EDF\u8BA1\u5DF2\u91CD\u7F6E");
+        new import_obsidian11.Notice("\u7EDF\u8BA1\u5DF2\u91CD\u7F6E");
       }
     ).open();
   }
@@ -3247,7 +4001,9 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
   refreshShortcuts() {
     this.shortcutsService.clearAll();
     this.shortcutsService.registerAll((actionId, customPromptId) => {
-      if (actionId === "custom" && customPromptId) {
+      if (actionId === "wechat-insert-images") {
+        this.executeWeChatImageInsertion();
+      } else if (actionId === "custom" && customPromptId) {
         this.executeCustomPrompt(customPromptId);
       } else {
         this.executeAction(actionId);
@@ -3336,24 +4092,24 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
    */
   async executeAction(actionType, isSelection = false) {
     if (this.isProcessing) {
-      new import_obsidian10.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      new import_obsidian11.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
       return;
     }
     this.isProcessing = true;
     try {
       const file = this.app.workspace.getActiveFile();
       if (!file) {
-        new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+        new import_obsidian11.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
         return;
       }
-      if (!(file instanceof import_obsidian10.TFile)) {
-        new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
+      if (!(file instanceof import_obsidian11.TFile)) {
+        new import_obsidian11.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
         return;
       }
       const content = await this.app.vault.read(file);
       const selectedText = this.getSelectedText();
       if (isSelection && !selectedText) {
-        new import_obsidian10.Notice("\u8BF7\u5148\u9009\u4E2D\u8981\u5904\u7406\u7684\u6587\u5B57");
+        new import_obsidian11.Notice("\u8BF7\u5148\u9009\u4E2D\u8981\u5904\u7406\u7684\u6587\u5B57");
         return;
       }
       const context = {
@@ -3367,7 +4123,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       };
       const actionName = this.getActionName(actionType);
       this.statusBarService.setProcessing(actionName);
-      new import_obsidian10.Notice(`\u6B63\u5728\u5904\u7406: ${actionName}...`);
+      new import_obsidian11.Notice(`\u6B63\u5728\u5904\u7406: ${actionName}...`);
       const previewMode = this.settings.ui.confirmBeforeReplace;
       const result = await this.actionHandler.execute(actionType, context, void 0, { previewOnly: true });
       if (result.success && result.output) {
@@ -3380,7 +4136,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
             async () => {
               const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
               if (applyResult.success) {
-                new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
+                new import_obsidian11.Notice(`${actionName} \u5B8C\u6210`);
                 this.addToHistory(actionType, actionName, file, applyResult, isSelection);
                 await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
                   prompt: 0,
@@ -3390,13 +4146,13 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
               }
             },
             () => {
-              new import_obsidian10.Notice("\u5DF2\u53D6\u6D88\u64CD\u4F5C");
+              new import_obsidian11.Notice("\u5DF2\u53D6\u6D88\u64CD\u4F5C");
             }
           );
         } else {
           const applyResult = await this.actionHandler.applyResult(actionType, context, result.output);
           if (applyResult.success) {
-            new import_obsidian10.Notice(`${actionName} \u5B8C\u6210`);
+            new import_obsidian11.Notice(`${actionName} \u5B8C\u6210`);
             this.addToHistory(actionType, actionName, file, applyResult, isSelection);
             await this.statisticsService.recordSuccess(actionName, result.tokensUsed ? {
               prompt: 0,
@@ -3407,7 +4163,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
         }
       } else {
         this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
-        new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+        new import_obsidian11.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
         await this.statisticsService.recordFailure();
       }
     } finally {
@@ -3419,23 +4175,23 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
    */
   async executeCustomPrompt(promptId) {
     if (this.isProcessing) {
-      new import_obsidian10.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      new import_obsidian11.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
       return;
     }
     this.isProcessing = true;
     try {
       const prompt = this.customPromptsService.getById(promptId);
       if (!prompt) {
-        new import_obsidian10.Notice("Prompt \u4E0D\u5B58\u5728");
+        new import_obsidian11.Notice("Prompt \u4E0D\u5B58\u5728");
         return;
       }
       const file = this.app.workspace.getActiveFile();
       if (!file) {
-        new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+        new import_obsidian11.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
         return;
       }
-      if (!(file instanceof import_obsidian10.TFile)) {
-        new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
+      if (!(file instanceof import_obsidian11.TFile)) {
+        new import_obsidian11.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
         return;
       }
       const content = await this.app.vault.read(file);
@@ -3451,15 +4207,36 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
         isSelection
       };
       this.statusBarService.setProcessing(prompt.name);
-      new import_obsidian10.Notice(`\u6B63\u5728\u6267\u884C: ${prompt.name}...`);
+      new import_obsidian11.Notice(`\u6B63\u5728\u6267\u884C: ${prompt.name}...`);
       const result = await this.actionHandler.execute("custom", context, prompt);
       if (result.success) {
         this.statusBarService.setCompleted(result.tokensUsed);
-        new import_obsidian10.Notice(`${prompt.name} \u5B8C\u6210`);
+        new import_obsidian11.Notice(`${prompt.name} \u5B8C\u6210`);
         this.addToHistory("custom", prompt.name, file, result, isSelection);
       } else {
         this.statusBarService.setError(result.error || "\u672A\u77E5\u9519\u8BEF");
-        new import_obsidian10.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+        new import_obsidian11.Notice(`\u64CD\u4F5C\u5931\u8D25: ${result.error}`);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async executeWeChatImageInsertion(file) {
+    if (this.isProcessing) {
+      new import_obsidian11.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.weChatImageWorkflow.run(file);
+      if (result.cancelled) {
+        new import_obsidian11.Notice("\u5DF2\u53D6\u6D88\u516C\u4F17\u53F7\u914D\u56FE");
+      } else if (result.success) {
+        new import_obsidian11.Notice(
+          `\u914D\u56FE\u5B8C\u6210\uFF1A\u6210\u529F ${result.successCount || 0} \u5F20\uFF0C\u5931\u8D25 ${result.failureCount || 0} \u5F20`
+        );
+      } else {
+        new import_obsidian11.Notice(`\u914D\u56FE\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
       }
     } finally {
       this.isProcessing = false;
@@ -3474,6 +4251,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
       return (prompt == null ? void 0 : prompt.name) || "\u81EA\u5B9A\u4E49";
     }
     const names = {
+      "wechat-insert-images": "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247",
       summarize: "\u603B\u7ED3",
       outline: "\u5927\u7EB2",
       translate: "\u7FFB\u8BD1",
@@ -3489,11 +4267,11 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
   async sendToClaudian(instruction) {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
-      new import_obsidian10.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
+      new import_obsidian11.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
       return;
     }
-    if (!(file instanceof import_obsidian10.TFile)) {
-      new import_obsidian10.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
+    if (!(file instanceof import_obsidian11.TFile)) {
+      new import_obsidian11.Notice("\u5F53\u524D\u6587\u4EF6\u4E0D\u662F\u7B14\u8BB0");
       return;
     }
     const selectedText = this.getSelectedText();
@@ -3524,7 +4302,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
         }
         await this.saveSettings();
         this.refreshCustomPromptCommands();
-        new import_obsidian10.Notice(`\u5DF2\u5BFC\u5165 ${imported} \u4E2A\u9884\u8BBE Prompt`);
+        new import_obsidian11.Notice(`\u5DF2\u5BFC\u5165 ${imported} \u4E2A\u9884\u8BBE Prompt`);
       }
     ).open();
   }
@@ -3532,7 +4310,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
    * Get selected text from active editor
    */
   getSelectedText() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
     if (!view)
       return void 0;
     const editor = view.editor;
@@ -3542,7 +4320,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     return selection || void 0;
   }
   getSelectionPosition(which) {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
     return view == null ? void 0 : view.editor.getCursor(which);
   }
   /**
@@ -3614,7 +4392,7 @@ var AIWorkbenchPlugin = class extends import_obsidian10.Plugin {
     }
   }
 };
-var WorkbenchView = class extends import_obsidian10.ItemView {
+var WorkbenchView = class extends import_obsidian11.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.noteInfoEl = null;
@@ -3673,9 +4451,13 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
       });
     }
     const customPrompts = this.plugin.getCustomPromptsService().getAll();
+    let renderedWeChatImageAction = false;
     if (customPrompts.length > 0) {
       const grouped = this.groupByCategory(customPrompts);
       for (const [categoryId, prompts] of grouped) {
+        const isWeChatCategory = categoryId === "wechat";
+        if (isWeChatCategory)
+          renderedWeChatImageAction = true;
         const categoryClass = categoryId.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "uncategorized";
         const category = PRESET_CATEGORIES.find((c) => c.id === categoryId) || {
           id: categoryId,
@@ -3692,7 +4474,7 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
           cls: "category-title"
         });
         header2.createEl("span", {
-          text: String(prompts.length),
+          text: String(prompts.length + (isWeChatCategory ? 1 : 0)),
           cls: "category-count"
         });
         const buttonsContainer2 = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
@@ -3705,7 +4487,32 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
             this.plugin.executeCustomPrompt(prompt.id);
           });
         }
+        if (isWeChatCategory) {
+          const imageButton = buttonsContainer2.createEl("button", {
+            cls: "ai-workbench-action-btn custom ai-workbench-wechat-images",
+            text: "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247"
+          });
+          imageButton.addEventListener("click", () => {
+            this.plugin.executeWeChatImageInsertion();
+          });
+        }
       }
+    }
+    if (!renderedWeChatImageAction) {
+      const categoryContainer = container.createDiv({
+        cls: "ai-workbench-category ai-workbench-category--wechat"
+      });
+      const header2 = categoryContainer.createDiv({ cls: "ai-workbench-category-header" });
+      header2.createEl("span", { text: "\u{1F4F0} \u516C\u4F17\u53F7", cls: "category-title" });
+      header2.createEl("span", { text: "1", cls: "category-count" });
+      const imageButtons = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
+      const imageButton = imageButtons.createEl("button", {
+        cls: "ai-workbench-action-btn custom ai-workbench-wechat-images",
+        text: "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247"
+      });
+      imageButton.addEventListener("click", () => {
+        this.plugin.executeWeChatImageInsertion();
+      });
     }
     if (this.plugin.settings.claudian.showButton) {
       const claudianContainer = container.createDiv({ cls: "ai-workbench-claudian" });
@@ -3817,7 +4624,7 @@ var WorkbenchView = class extends import_obsidian10.ItemView {
   async onClose() {
   }
 };
-var InstructionModal = class extends import_obsidian10.Modal {
+var InstructionModal = class extends import_obsidian11.Modal {
   constructor(app, onSubmit) {
     super(app);
     this.instruction = "";
@@ -3827,10 +4634,10 @@ var InstructionModal = class extends import_obsidian10.Modal {
     const { contentEl } = this;
     contentEl.addClass("ai-workbench-modal");
     contentEl.createEl("h3", { text: "\u53D1\u9001\u5230 Claudian" });
-    new import_obsidian10.Setting(contentEl).setName("\u9644\u52A0\u6307\u4EE4").setDesc("\u8F93\u5165\u4F60\u60F3\u8BA9 Claudian \u6267\u884C\u7684\u64CD\u4F5C").addText((text) => text.setPlaceholder("\u4F8B\u5982\uFF1A\u5E2E\u6211\u91CD\u5199\u8FD9\u4E00\u6BB5...").onChange((value) => {
+    new import_obsidian11.Setting(contentEl).setName("\u9644\u52A0\u6307\u4EE4").setDesc("\u8F93\u5165\u4F60\u60F3\u8BA9 Claudian \u6267\u884C\u7684\u64CD\u4F5C").addText((text) => text.setPlaceholder("\u4F8B\u5982\uFF1A\u5E2E\u6211\u91CD\u5199\u8FD9\u4E00\u6BB5...").onChange((value) => {
       this.instruction = value;
     }));
-    new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText("\u53D6\u6D88").onClick(() => {
+    new import_obsidian11.Setting(contentEl).addButton((btn) => btn.setButtonText("\u53D6\u6D88").onClick(() => {
       this.close();
     })).addButton((btn) => btn.setButtonText("\u53D1\u9001").setCta().onClick(() => {
       this.onSubmit(this.instruction);
@@ -3842,7 +4649,7 @@ var InstructionModal = class extends import_obsidian10.Modal {
     contentEl.empty();
   }
 };
-var PresetImportModal = class extends import_obsidian10.Modal {
+var PresetImportModal = class extends import_obsidian11.Modal {
   constructor(app, categorizedPresets, onImport) {
     super(app);
     this.selected = /* @__PURE__ */ new Set();
@@ -3877,7 +4684,7 @@ var PresetImportModal = class extends import_obsidian10.Modal {
     });
     const container = contentEl.createDiv({ cls: "preset-categories" });
     this.renderCategories(container);
-    const footerSetting = new import_obsidian10.Setting(contentEl);
+    const footerSetting = new import_obsidian11.Setting(contentEl);
     footerSetting.controlEl.createEl("span", { text: `\u5DF2\u9009\u62E9 ${this.selected.size} \u4E2A`, cls: "preset-count" });
     footerSetting.addButton((btn) => btn.setButtonText("\u53D6\u6D88").onClick(() => this.close())).addButton((btn) => btn.setButtonText("\u5BFC\u5165").setCta().onClick(() => {
       const selectedPresets = this.allPresets.filter((p) => this.selected.has(p.name));
@@ -3925,7 +4732,7 @@ var PresetImportModal = class extends import_obsidian10.Modal {
     contentEl.empty();
   }
 };
-var StatisticsModal = class extends import_obsidian10.Modal {
+var StatisticsModal = class extends import_obsidian11.Modal {
   constructor(app, stats, summary, onReset) {
     super(app);
     this.stats = stats;
@@ -3963,7 +4770,7 @@ var StatisticsModal = class extends import_obsidian10.Modal {
     detailsList.createEl("p", { text: `\u5931\u8D25\u8BF7\u6C42: ${this.stats.failedRequests}` });
     const lastReset = new Date(this.stats.lastReset).toLocaleDateString("zh-CN");
     detailsList.createEl("p", { text: `\u7EDF\u8BA1\u5F00\u59CB: ${lastReset}`, cls: "muted" });
-    new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText("\u91CD\u7F6E\u7EDF\u8BA1").setWarning().onClick(async () => {
+    new import_obsidian11.Setting(contentEl).addButton((btn) => btn.setButtonText("\u91CD\u7F6E\u7EDF\u8BA1").setWarning().onClick(async () => {
       this.onReset();
       this.close();
     })).addButton((btn) => btn.setButtonText("\u5173\u95ED").setCta().onClick(() => this.close()));

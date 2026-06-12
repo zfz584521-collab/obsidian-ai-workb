@@ -12,6 +12,7 @@ export class ContextMenuService {
     private executeAction: (actionType: ActionType, isSelection?: boolean) => Promise<void>;
     private executeCustomPrompt: (promptId: string) => Promise<void>;
     private getCustomPrompts: () => CustomPrompt[];
+    private executeWeChatImages: (file?: TFile) => Promise<void>;
 
     constructor(
         app: App,
@@ -19,7 +20,8 @@ export class ContextMenuService {
         settings: ContextMenuSettings,
         executeAction: (actionType: ActionType, isSelection?: boolean) => Promise<void>,
         executeCustomPrompt: (promptId: string) => Promise<void>,
-        getCustomPrompts: () => CustomPrompt[]
+        getCustomPrompts: () => CustomPrompt[],
+        executeWeChatImages: (file?: TFile) => Promise<void>
     ) {
         this.app = app;
         this.plugin = plugin;
@@ -27,6 +29,7 @@ export class ContextMenuService {
         this.executeAction = executeAction;
         this.executeCustomPrompt = executeCustomPrompt;
         this.getCustomPrompts = getCustomPrompts;
+        this.executeWeChatImages = executeWeChatImages;
     }
 
     updateSettings(settings: ContextMenuSettings) {
@@ -67,6 +70,10 @@ export class ContextMenuService {
                 .setIcon('sparkles')
                 .onClick(() => { });
         });
+        menu.addItem(item => item
+            .setTitle('公众号一键插入图片')
+            .setIcon('image-plus')
+            .onClick(() => this.executeWeChatImages()));
 
         // Built-in actions
         if (this.settings.showBuiltInActions) {
@@ -121,6 +128,10 @@ export class ContextMenuService {
                 .setIcon('sparkles')
                 .onClick(() => { });
         });
+        menu.addItem(item => item
+            .setTitle('公众号一键插入图片')
+            .setIcon('image-plus')
+            .onClick(() => this.executeWeChatImages(file)));
 
         if (this.settings.showBuiltInActions) {
             const actions: { type: ActionType; label: string }[] = [
