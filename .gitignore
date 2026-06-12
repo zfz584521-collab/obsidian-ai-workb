@@ -40,7 +40,6 @@ data.json
 backups/
 stats.json
 .superpowers/
-tests/
 
 # Release packages
 *.zip
