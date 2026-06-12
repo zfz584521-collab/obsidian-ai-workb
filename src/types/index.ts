@@ -2,6 +2,9 @@
  * AI Workbench - Type Definitions
  */
 
+import { DEFAULT_PUBLISHING_SETTINGS } from '../publishing/defaults';
+import { PublishingSettings } from '../publishing/types';
+
 // ============ Settings ============
 
 export interface ApiSettings {
@@ -91,6 +94,7 @@ export interface WorkbenchSettings {
     shortcuts: ShortcutSettings;
     contextMenu: ContextMenuSettings;
     ui: UISettings;
+    publishing: PublishingSettings;
 }
 
 // ============ AI Response ============
@@ -210,7 +214,8 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         showStatusBar: true,
         confirmBeforeReplace: true,
         showTokenCount: false
-    }
+    },
+    publishing: DEFAULT_PUBLISHING_SETTINGS
 };
 
 // ============ Built-in Prompts ============
