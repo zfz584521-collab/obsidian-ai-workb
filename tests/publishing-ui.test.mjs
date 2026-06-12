@@ -18,6 +18,10 @@ const publishingSettingsSource = await readFile(
     new URL('../src/publishing/settings-ui.ts', import.meta.url),
     'utf8'
 );
+const modalSource = await readFile(
+    new URL('../src/publishing/modal.ts', import.meta.url),
+    'utf8'
+);
 const styles = await readFile(
     new URL('../styles.css', import.meta.url),
     'utf8'
@@ -41,4 +45,13 @@ test('settings expose publishing platforms and connection controls', () => {
     assert.match(publishingSettingsSource, /测试连接/);
     assert.match(publishingSettingsSource, /mediaUploadUrl/);
     assert.match(styles, /\.ai-workbench-platform-settings/);
+});
+
+test('publish modal supports unified content, platform overrides, and failed retry', () => {
+    assert.match(modalSource, /统一内容/);
+    assert.match(modalSource, /平台设置/);
+    assert.match(modalSource, /仅重试失败平台/);
+    assert.match(modalSource, /已覆盖/);
+    assert.match(styles, /\.ai-workbench-publish-modal/);
+    assert.match(styles, /\.ai-workbench-publish-result-row/);
 });

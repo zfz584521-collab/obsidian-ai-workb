@@ -258,6 +258,105 @@
     }
 }
 
+.ai-workbench-publish-modal {
+    width: min(1000px, 92vw);
+}
+
+.ai-workbench-publish-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
+    gap: 20px;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.ai-workbench-publish-editor textarea {
+    min-height: 120px;
+}
+
+.ai-workbench-publish-tabs {
+    display: flex;
+    gap: 6px;
+    padding-bottom: 8px;
+    overflow-x: auto;
+}
+
+.ai-workbench-publish-tabs button {
+    flex: 0 0 auto;
+    min-height: 34px;
+}
+
+.ai-workbench-publish-tabs button.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.ai-workbench-platform-override {
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.ai-workbench-media-list,
+.ai-workbench-publish-results {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ai-workbench-media-row,
+.ai-workbench-publish-result-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    overflow-wrap: anywhere;
+}
+
+.ai-workbench-media-row span,
+.ai-workbench-publish-result-row span {
+    min-width: 0;
+    flex: 1;
+}
+
+.ai-workbench-media-row button {
+    flex: 0 0 auto;
+}
+
+.ai-workbench-media-actions,
+.ai-workbench-publish-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.ai-workbench-publish-result-row {
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+.ai-workbench-publish-result-row .is-success {
+    color: var(--color-green);
+}
+
+.ai-workbench-publish-result-row .is-error {
+    color: var(--color-red);
+}
+
+@media (max-width: 760px) {
+    .ai-workbench-publish-modal {
+        width: auto;
+    }
+
+    .ai-workbench-publish-layout {
+        grid-template-columns: 1fr;
+        max-height: none;
+    }
+}
+
 .ai-workbench-history-list {
     display: flex;
     flex-direction: column;
