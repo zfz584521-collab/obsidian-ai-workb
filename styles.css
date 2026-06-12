@@ -207,6 +207,57 @@
     text-align: center;
 }
 
+.ai-workbench-platform-settings {
+    margin-bottom: 24px;
+}
+
+.ai-workbench-platform-setting-row {
+    min-height: 58px;
+}
+
+.ai-workbench-platform-setting-row .setting-item-control {
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ai-workbench-platform-status {
+    margin: 8px 0 16px;
+    padding: 10px 12px;
+    border-left: 3px solid var(--color-orange);
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.ai-workbench-platform-config-modal {
+    min-width: min(620px, 90vw);
+}
+
+.ai-workbench-platform-config-modal h3 {
+    margin-top: 0;
+}
+
+.ai-workbench-platform-fields {
+    margin: 12px 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.ai-workbench-platform-fields textarea {
+    min-height: 110px;
+    font-family: var(--font-monospace);
+}
+
+@media (max-width: 600px) {
+    .ai-workbench-platform-config-modal {
+        min-width: 0;
+    }
+
+    .ai-workbench-platform-setting-row .setting-item-info,
+    .ai-workbench-platform-setting-row .setting-item-control {
+        width: 100%;
+    }
+}
+
 .ai-workbench-history-list {
     display: flex;
     flex-direction: column;
