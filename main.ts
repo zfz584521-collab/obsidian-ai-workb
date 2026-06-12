@@ -12,7 +12,8 @@ import {
     ItemView,
     MarkdownView,
     Modal,
-    Setting
+    Setting,
+    setIcon
 } from 'obsidian';
 import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt } from './src/types';
 import { AIService } from './src/services/ai';
@@ -32,6 +33,17 @@ import { getCategorizedPresets, PRESET_CATEGORIES, PresetCategory } from './src/
 import { ActionHandler } from './src/actions';
 import { WorkbenchSettingTab } from './src/settings';
 import { MAX_HISTORY_ENTRIES } from './src/constants';
+import { mergePublishingSettings } from './src/publishing/defaults';
+import {
+    PUBLISHING_PLATFORMS,
+    PublishingHistoryEntry,
+    PublishingPlatform
+} from './src/publishing/types';
+import { ObsidianContentExtractor } from './src/publishing/obsidian-content';
+import { WebhookClient } from './src/publishing/webhook';
+import { PublishingAdapterFactory } from './src/publishing/adapters';
+import { PublishingService } from './src/publishing/service';
+import { PublishEditorModal } from './src/publishing/modal';
 
 const VIEW_TYPE = 'ai-workbench-view';
 
@@ -51,6 +63,9 @@ export default class AIWorkbenchPlugin extends Plugin {
     private statisticsService: StatisticsService;
     private helpService: HelpService;
     private actionHandler: ActionHandler;
+    private contentExtractor: ObsidianContentExtractor;
+    private publishingService: PublishingService;
+    private publishingHistory: PublishingHistoryEntry[] = [];
     private history: HistoryEntry[] = [];
     private isProcessing: boolean = false; // Lock to prevent concurrent operations
 
@@ -70,6 +85,20 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.previewService = new PreviewService(this.app);
         this.statisticsService = new StatisticsService(this.app, this);
         this.helpService = new HelpService(this.app);
+        this.contentExtractor = new ObsidianContentExtractor(this.app);
+        this.publishingService = new PublishingService(
+            this.settings.publishing,
+            new PublishingAdapterFactory(new WebhookClient()),
+            async entries => {
+                this.publishingHistory = entries;
+                await this.saveData({
+                    ...this.settings,
+                    publishingHistory: this.publishingHistory
+                });
+            },
+            ms => new Promise(resolve => setTimeout(resolve, ms)),
+            this.publishingHistory
+        );
         this.actionHandler = new ActionHandler(
             this.app,
             this.aiService,
@@ -101,6 +130,19 @@ export default class AIWorkbenchPlugin extends Plugin {
             id: 'open-ai-workbench',
             name: 'Open AI Workbench',
             callback: () => this.activateView()
+        });
+
+        this.addCommand({
+            id: 'open-draft-publisher',
+            name: '发布当前笔记到平台草稿箱',
+            callback: () => {
+                const platforms = this.getDefaultPublishingPlatforms();
+                if (platforms.length === 0) {
+                    new Notice('请先在设置中启用并配置至少一个发布平台');
+                    return;
+                }
+                this.openPublishingModal(platforms);
+            }
         });
 
         // Add commands for quick actions
@@ -183,6 +225,9 @@ export default class AIWorkbenchPlugin extends Plugin {
 
     async loadSettings() {
         const saved = await this.loadData();
+        this.publishingHistory = Array.isArray(saved?.publishingHistory)
+            ? saved.publishingHistory.slice(0, 50)
+            : [];
         this.settings = {
             api: { ...DEFAULT_SETTINGS.api, ...saved?.api },
             output: { ...DEFAULT_SETTINGS.output, ...saved?.output },
@@ -191,12 +236,16 @@ export default class AIWorkbenchPlugin extends Plugin {
             customPrompts: { ...DEFAULT_SETTINGS.customPrompts, ...saved?.customPrompts },
             shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...saved?.shortcuts },
             contextMenu: { ...DEFAULT_SETTINGS.contextMenu, ...saved?.contextMenu },
-            ui: { ...DEFAULT_SETTINGS.ui, ...saved?.ui }
+            ui: { ...DEFAULT_SETTINGS.ui, ...saved?.ui },
+            publishing: mergePublishingSettings(saved?.publishing)
         };
     }
 
     async saveSettings() {
-        await this.saveData(this.settings);
+        await this.saveData({
+            ...this.settings,
+            publishingHistory: this.publishingHistory
+        });
         this.aiService.updateSettings(this.settings.api);
         this.backupService.updateSettings(this.settings.backup);
         this.fileService.updateSettings(this.settings.output);
@@ -204,6 +253,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.shortcutsService.updateSettings(this.settings.shortcuts);
         this.contextMenuService.updateSettings(this.settings.contextMenu);
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
+        this.publishingService?.updateSettings(this.settings.publishing);
     }
 
     /**
@@ -235,6 +285,67 @@ export default class AIWorkbenchPlugin extends Plugin {
 
     getHelpService(): HelpService {
         return this.helpService;
+    }
+
+    getPublishingService(): PublishingService {
+        return this.publishingService;
+    }
+
+    async openPublishingModal(platforms: PublishingPlatform[]): Promise<void> {
+        const file = this.app.workspace.getActiveFile();
+        if (!file || file.extension !== 'md') {
+            new Notice('请先打开一篇 Markdown 笔记');
+            return;
+        }
+        const available = platforms.filter(platform =>
+            this.isPublishingPlatformConfigured(platform)
+        );
+        if (available.length === 0) {
+            new Notice('所选平台尚未启用或配置完成');
+            return;
+        }
+        const content = await this.contentExtractor.extract(file);
+        new PublishEditorModal(
+            this.app,
+            content,
+            available,
+            this.publishingService,
+            media => this.contentExtractor.loadMedia(media)
+        ).open();
+    }
+
+    isPublishingPlatformConfigured(platform: PublishingPlatform): boolean {
+        const settings = this.settings.publishing.platforms[platform];
+        if (!settings.enabled) return false;
+        if (settings.connectionType === 'webhook') {
+            return Boolean(settings.webhook.url);
+        }
+        if (platform === 'wechat') {
+            return Boolean(settings.official.appId && settings.official.appSecret);
+        }
+        if (platform === 'youtube') {
+            return Boolean(
+                settings.official.clientId &&
+                settings.official.clientSecret &&
+                settings.official.refreshToken
+            );
+        }
+        return false;
+    }
+
+    openPublishingSettings(): void {
+        const setting = (this.app as any).setting;
+        setting?.open();
+        setting?.openTabById(this.manifest.id);
+    }
+
+    private getDefaultPublishingPlatforms(): PublishingPlatform[] {
+        const defaults = this.settings.publishing.defaultPlatforms
+            .filter(platform => this.isPublishingPlatformConfigured(platform));
+        if (defaults.length > 0) return defaults;
+        return PUBLISHING_PLATFORMS.filter(platform =>
+            this.isPublishingPlatformConfigured(platform)
+        );
     }
 
     /**
@@ -683,11 +794,14 @@ class WorkbenchView extends ItemView {
     private plugin: AIWorkbenchPlugin;
     private noteInfoEl: HTMLElement | null = null;
     private historyListEl: HTMLElement | null = null;
+    private publishingContainer: HTMLElement | null = null;
+    private selectedPlatforms: Set<PublishingPlatform>;
     private isRendered: boolean = false;
 
     constructor(leaf: WorkspaceLeaf, plugin: AIWorkbenchPlugin) {
         super(leaf);
         this.plugin = plugin;
+        this.selectedPlatforms = new Set(plugin.settings.publishing.defaultPlatforms);
     }
 
     getViewType(): string {
@@ -707,7 +821,7 @@ class WorkbenchView extends ItemView {
     }
 
     private render() {
-        const container = this.containerEl.children[1];
+        const container = this.containerEl.children[1] as HTMLElement;
 
         // Only render static content once
         if (!this.isRendered) {
@@ -804,6 +918,9 @@ class WorkbenchView extends ItemView {
             }
         }
 
+        this.publishingContainer = container.createDiv({ cls: 'ai-workbench-publishing' });
+        this.renderPublishingControls();
+
         // Claudian section
         if (this.plugin.settings.claudian.showButton) {
             const claudianContainer = container.createDiv({ cls: 'ai-workbench-claudian' });
@@ -872,6 +989,81 @@ class WorkbenchView extends ItemView {
         if (this.historyListEl) {
             this.renderHistory(this.historyListEl);
         }
+        this.renderPublishingControls();
+    }
+
+    private renderPublishingControls(): void {
+        if (!this.publishingContainer) return;
+        const container = this.publishingContainer;
+        container.empty();
+
+        const header = container.createDiv({ cls: 'ai-workbench-publishing-header' });
+        header.createEl('h3', { text: '发布到草稿箱' });
+        const settingsButton = header.createEl('button', {
+            cls: 'clickable-icon',
+            attr: { 'aria-label': '发布平台设置' }
+        });
+        setIcon(settingsButton, 'settings');
+        settingsButton.addEventListener('click', () => this.plugin.openPublishingSettings());
+
+        const grid = container.createDiv({ cls: 'ai-workbench-platform-grid' });
+        const labels: Record<PublishingPlatform, string> = {
+            wechat: '微信公众号',
+            xiaohongshu: '小红书',
+            wechatChannels: '视频号',
+            douyin: '抖音',
+            x: 'X',
+            youtube: 'YouTube'
+        };
+        for (const platform of PUBLISHING_PLATFORMS) {
+            const configured = this.plugin.isPublishingPlatformConfigured(platform);
+            if (!configured) this.selectedPlatforms.delete(platform);
+            const selected = configured && this.selectedPlatforms.has(platform);
+            const button = grid.createEl('button', {
+                cls: [
+                    'ai-workbench-platform-option',
+                    selected ? 'is-selected' : '',
+                    configured ? '' : 'is-disabled'
+                ].filter(Boolean).join(' '),
+                attr: {
+                    'aria-pressed': String(selected),
+                    'aria-disabled': String(!configured)
+                }
+            });
+            const icon = button.createSpan({ cls: 'ai-workbench-platform-check' });
+            setIcon(icon, selected ? 'check' : 'circle');
+            button.createSpan({ text: labels[platform] });
+            button.addEventListener('click', () => {
+                if (!configured) {
+                    new Notice(`${labels[platform]}尚未配置，请先前往设置`);
+                    this.plugin.openPublishingSettings();
+                    return;
+                }
+                if (selected) {
+                    this.selectedPlatforms.delete(platform);
+                } else {
+                    this.selectedPlatforms.add(platform);
+                }
+                this.renderPublishingControls();
+            });
+        }
+
+        const footer = container.createDiv({ cls: 'ai-workbench-publishing-footer' });
+        footer.createSpan({ text: `已选择 ${this.selectedPlatforms.size} 个平台` });
+        const publishButton = footer.createEl('button', {
+            cls: 'mod-cta ai-workbench-publish-button'
+        });
+        const publishIcon = publishButton.createSpan();
+        setIcon(publishIcon, 'send');
+        publishButton.createSpan({
+            text: this.selectedPlatforms.size > 0
+                ? `编辑并发布 ${this.selectedPlatforms.size} 个草稿`
+                : '编辑并发布'
+        });
+        publishButton.disabled = this.selectedPlatforms.size === 0;
+        publishButton.addEventListener('click', () => {
+            this.plugin.openPublishingModal([...this.selectedPlatforms]);
+        });
     }
 
     private groupByCategory(prompts: CustomPrompt[]): Map<string, CustomPrompt[]> {

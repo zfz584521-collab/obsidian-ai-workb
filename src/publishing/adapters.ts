@@ -76,7 +76,7 @@ export class UnavailableOfficialAdapter implements PlatformAdapter {
         };
     }
 
-    async validate(): Promise<ValidationIssue[]> {
+    async validate(_request: PlatformPublishRequest): Promise<ValidationIssue[]> {
         return [{
             code: 'OFFICIAL_API_UNAVAILABLE',
             field: 'connectionType',

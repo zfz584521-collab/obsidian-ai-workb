@@ -191,7 +191,7 @@ export class ActionHandler {
         }
 
         const editor = view.editor;
-        if (!editor || !context.selectionFrom || !context.selectionTo) {
+        if (!editor || !context.selectionFrom || !context.selectionTo || !context.selectedText) {
             throw new Error('编辑器不可用');
         }
 

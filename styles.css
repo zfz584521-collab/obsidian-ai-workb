@@ -32,6 +32,7 @@
 }
 
 .ai-workbench-actions h3,
+.ai-workbench-publishing h3,
 .ai-workbench-claudian h3,
 .ai-workbench-history h3 {
     font-size: 14px;
@@ -205,6 +206,91 @@
     font-size: 12px;
     color: var(--text-muted);
     text-align: center;
+}
+
+.ai-workbench-publishing {
+    margin: 20px 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.ai-workbench-publishing-header,
+.ai-workbench-publishing-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ai-workbench-publishing-header h3 {
+    margin: 0;
+}
+
+.ai-workbench-platform-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 0 12px;
+}
+
+.ai-workbench-platform-option {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 42px;
+    padding: 8px 9px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background: var(--interactive-normal);
+    color: var(--text-normal);
+    text-align: left;
+    white-space: normal;
+}
+
+.ai-workbench-platform-option.is-selected {
+    border-color: var(--interactive-accent);
+    background: var(--background-modifier-active-hover);
+}
+
+.ai-workbench-platform-option.is-disabled {
+    color: var(--text-faint);
+    opacity: 0.75;
+}
+
+.ai-workbench-platform-check,
+.ai-workbench-platform-check svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+.ai-workbench-publishing-footer {
+    align-items: flex-end;
+    flex-direction: column;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.ai-workbench-publish-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    width: 100%;
+    min-height: 38px;
+    white-space: normal;
+}
+
+.ai-workbench-publish-button svg {
+    width: 16px;
+    height: 16px;
+}
+
+@media (max-width: 300px) {
+    .ai-workbench-platform-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 .ai-workbench-platform-settings {
