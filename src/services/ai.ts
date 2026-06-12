@@ -87,6 +87,14 @@ export class AIService implements IAIService {
         return { success: false, error: '请求失败' };
     }
 
+    async completeJson(prompt: string, content: string): Promise<string> {
+        const response = await this.chat(prompt, content);
+        if (!response.success || !response.content) {
+            throw new Error(response.error || '文本 AI 未返回任务');
+        }
+        return response.content;
+    }
+
     /**
      * Make the actual API request
      */

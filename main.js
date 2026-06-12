@@ -229,6 +229,13 @@ var AIService = class {
     }
     return { success: false, error: "\u8BF7\u6C42\u5931\u8D25" };
   }
+  async completeJson(prompt, content) {
+    const response = await this.chat(prompt, content);
+    if (!response.success || !response.content) {
+      throw new Error(response.error || "\u6587\u672C AI \u672A\u8FD4\u56DE\u4EFB\u52A1");
+    }
+    return response.content;
+  }
   /**
    * Make the actual API request
    */
