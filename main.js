@@ -1343,6 +1343,9 @@ var StatusBarService = class {
     this.lastError = null;
     this.render();
   }
+  setProgress(action, completed, total) {
+    this.setProcessing(`${action} ${completed}/${total} \u5F20\u56FE\u7247`);
+  }
   /**
    * Set completed state
    */

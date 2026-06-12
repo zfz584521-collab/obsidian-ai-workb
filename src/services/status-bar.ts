@@ -55,6 +55,10 @@ export class StatusBarService {
         this.render();
     }
 
+    setProgress(action: string, completed: number, total: number) {
+        this.setProcessing(`${action} ${completed}/${total} 张图片`);
+    }
+
     /**
      * Set completed state
      */

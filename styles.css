@@ -833,3 +833,27 @@
     font-size: 13px;
     color: var(--text-muted);
 }
+.ai-workbench-image-task-preview {
+    max-width: 720px;
+}
+
+.ai-workbench-image-task {
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    background: var(--background-secondary);
+}
+
+.ai-workbench-image-task__prompt {
+    margin: 8px 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text-normal);
+}
+
+.ai-workbench-image-task__anchor {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    overflow-wrap: anywhere;
+}

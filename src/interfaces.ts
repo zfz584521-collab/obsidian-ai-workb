@@ -308,6 +308,8 @@ export interface IStatusBarService {
      */
     setProcessing(actionName: string): void;
 
+    setProgress(actionName: string, completed: number, total: number): void;
+
     /**
      * Set completed status
      */
