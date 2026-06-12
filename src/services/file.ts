@@ -5,6 +5,10 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import { OutputSettings } from '../types';
 import { MAX_FILENAME_CONFLICT_ATTEMPTS, MARKDOWN_EXTENSION } from '../constants';
+import {
+    IllustratedOutputPaths,
+    resolveIllustratedOutputPaths
+} from '../wechat-images/output-writer';
 
 export class FileService {
     private app: App;
@@ -103,6 +107,14 @@ export class FileService {
         // Create the file
         const newFile = await vault.create(newPath, content);
         return newFile;
+    }
+
+    async resolveIllustratedOutput(originalFile: TFile): Promise<IllustratedOutputPaths> {
+        return resolveIllustratedOutputPaths(
+            originalFile.path,
+            path => this.app.vault.adapter.exists(path),
+            MAX_FILENAME_CONFLICT_ATTEMPTS
+        );
     }
 
     /**

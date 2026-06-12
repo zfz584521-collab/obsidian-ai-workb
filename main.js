@@ -693,6 +693,33 @@ var BackupListModal = class extends import_obsidian2.Modal {
 
 // src/services/file.ts
 var import_obsidian3 = require("obsidian");
+
+// src/wechat-images/output-writer.ts
+function normalizePath2(path) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "");
+}
+function joinPath(parent, child) {
+  return parent ? `${parent}/${child}` : child;
+}
+async function resolveIllustratedOutputPaths(originalPath, exists, maxAttempts = 100) {
+  const normalized = normalizePath2(originalPath);
+  const slash = normalized.lastIndexOf("/");
+  const parent = slash >= 0 ? normalized.slice(0, slash) : "";
+  const filename = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  const originalBase = filename.replace(/\.md$/i, "");
+  for (let counter = 0; counter <= maxAttempts; counter++) {
+    const suffix = counter === 0 ? "" : `-${counter}`;
+    const baseName = `${originalBase}-\u5DF2\u914D\u56FE${suffix}`;
+    const articlePath = joinPath(parent, `${baseName}.md`);
+    const assetDirPath = joinPath(parent, `${baseName}-assets`);
+    if (!await exists(articlePath) && !await exists(assetDirPath)) {
+      return { articlePath, assetDirPath, baseName };
+    }
+  }
+  throw new Error("\u65E0\u6CD5\u521B\u5EFA\u914D\u56FE\u6587\u7AE0\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A");
+}
+
+// src/services/file.ts
 var FileService = class {
   constructor(app, settings) {
     this.app = app;
@@ -778,6 +805,13 @@ ${afterInsert}`;
     }
     const newFile = await vault.create(newPath, content);
     return newFile;
+  }
+  async resolveIllustratedOutput(originalFile) {
+    return resolveIllustratedOutputPaths(
+      originalFile.path,
+      (path) => this.app.vault.adapter.exists(path),
+      MAX_FILENAME_CONFLICT_ATTEMPTS
+    );
   }
   /**
    * Get current active note

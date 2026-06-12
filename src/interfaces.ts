@@ -72,6 +72,14 @@ export interface IFileService {
         content: string
     ): Promise<import('obsidian').TFile>;
 
+    resolveIllustratedOutput(
+        originalFile: import('obsidian').TFile
+    ): Promise<{
+        articlePath: string;
+        assetDirPath: string;
+        baseName: string;
+    }>;
+
     /**
      * Get current active file
      */
