@@ -1,5 +1,19 @@
 # AI Workbench - Obsidian Plugin
 
+## Multi-platform draft publishing
+
+The workbench can prepare the active note for WeChat Official Account, Xiaohongshu, WeChat Channels, Douyin, X, and YouTube.
+
+- WeChat Official Account supports its official draft API or a Webhook relay.
+- YouTube supports official private video uploads or a Webhook relay.
+- Xiaohongshu, WeChat Channels, Douyin, and X use the Webhook draft contract in this release.
+
+Configure platforms under **Settings → AI Workbench → Publishing platforms**. Before submission, edit shared title, body, cover, images, video, summary, and tags, then optionally override fields for individual platforms.
+
+Webhook connections support Bearer tokens, custom headers, and HMAC-SHA256 signatures. Local media requires a media upload URL. Credentials are stored in local Obsidian plugin data, but are not encrypted by default.
+
+Platform submissions are isolated. Successful drafts remain when another platform fails, and failed platforms can be retried with the same idempotency key. The plugin never silently falls back from an official API to a Webhook and does not publish content publicly.
+
 [![GitHub release](https://img.shields.io/github/v/release/zfz584521-collab/obsidian-ai-workb?include_prereleases)](https://github.com/zfz584521-collab/obsidian-ai-workb/releases)
 [![GitHub license](https://img.shields.io/github/license/zfz584521-collab/obsidian-ai-workb)](LICENSE)
 [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%483699&label=downloads&query=%24%5B%22ai-workbench%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://obsidian.md/plugins?id=ai-workbench)

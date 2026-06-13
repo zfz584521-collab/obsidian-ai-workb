@@ -6,6 +6,7 @@ import { App, PluginSettingTab, Setting, Modal, Notice, debounce } from 'obsidia
 import type AIWorkbenchPlugin from '../main';
 import { WorkbenchSettings, CustomPrompt, ShortcutBinding } from './types';
 import { SETTINGS_DEBOUNCE_MS, MIN_API_KEY_LENGTH, API_KEY_MASK_LENGTH } from './constants';
+import { PublishingSettingsRenderer } from './publishing/settings-ui';
 
 export class WorkbenchSettingTab extends PluginSettingTab {
     plugin: AIWorkbenchPlugin;
@@ -410,6 +411,10 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                     this.plugin.settings.contextMenu.showCustomPrompts = value;
                     await this.plugin.saveSettings();
                 }));
+
+        // Publishing platform settings
+        containerEl.createEl('h2', { text: '发布平台' });
+        new PublishingSettingsRenderer(this.app, this.plugin, containerEl).render();
 
         // UI Settings
         containerEl.createEl('h2', { text: '界面设置' });

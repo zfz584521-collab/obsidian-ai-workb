@@ -1,5 +1,19 @@
 # AI Workbench - Obsidian Plugin
 
+## 多平台草稿发布
+
+AI 工作台支持把当前笔记准备为微信公众号、小红书、视频号、抖音、X 和 YouTube 草稿。
+
+- 微信公众号：官方草稿箱或 Webhook。
+- YouTube：官方 API 私密上传或 Webhook。
+- 小红书、视频号、抖音、X：本版本使用 Webhook 草稿。
+
+在“设置 → AI Workbench → 发布平台”中启用平台并配置连接。工作台可同时勾选多个平台，发布前可编辑统一标题、正文、封面、图片、视频和标签，也可为单个平台覆盖内容。
+
+Webhook 支持 Bearer Token、自定义请求头和 HMAC-SHA256 签名。含本地媒体时还需配置媒体上传 URL。平台凭据仅保存在本地插件数据中，但默认并未加密。
+
+多平台提交互不影响：部分平台失败时，成功草稿会保留，失败平台可使用原幂等键单独重试。插件不会自动公开发布，也不会在官方接口失败后静默改走 Webhook。
+
 [![GitHub release](https://img.shields.io/github/v/release/zfz584521-collab/obsidian-ai-workb?include_prereleases)](https://github.com/zfz584521-collab/obsidian-ai-workb/releases)
 [![GitHub license](https://img.shields.io/github/license/zfz584521-collab/obsidian-ai-workb)](LICENSE)
 [![Obsidian Downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%483699&label=downloads&query=%24%5B%22ai-workbench%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://obsidian.md/plugins?id=ai-workbench)

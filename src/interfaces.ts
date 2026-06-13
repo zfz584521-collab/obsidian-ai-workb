@@ -380,3 +380,21 @@ export interface IHelpService {
      */
     showShortcutsHelp(shortcuts: Array<{ key: string; action: string }>): void;
 }
+
+/**
+ * Obsidian publishing content extractor interface
+ */
+export interface IObsidianContentExtractor {
+    extract(file: import('obsidian').TFile): Promise<import('./publishing/types').PublishContent>;
+    loadMedia(media: import('./publishing/types').PublishMedia): Promise<import('./publishing/types').PublishMedia>;
+}
+
+/**
+ * Multi-platform publishing service interface
+ */
+export interface IPublishingService {
+    updateSettings(settings: import('./publishing/types').PublishingSettings): void;
+    publishAll(input: import('./publishing/service').PublishTaskInput): Promise<import('./publishing/types').PublishTaskResult>;
+    retryFailed(task: import('./publishing/types').PublishTaskResult): Promise<import('./publishing/types').PublishTaskResult>;
+    testConnection(platform: import('./publishing/types').PublishingPlatform): Promise<import('./publishing/types').ConnectionTestResult>;
+}
