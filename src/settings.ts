@@ -7,6 +7,7 @@ import type AIWorkbenchPlugin from '../main';
 import { WorkbenchSettings, CustomPrompt, ShortcutBinding } from './types';
 import { SETTINGS_DEBOUNCE_MS, MIN_API_KEY_LENGTH, API_KEY_MASK_LENGTH } from './constants';
 import { PublishingSettingsRenderer } from './publishing/settings-ui';
+import { t, i18n } from './i18n';
 
 export class WorkbenchSettingTab extends PluginSettingTab {
     plugin: AIWorkbenchPlugin;
@@ -21,19 +22,40 @@ export class WorkbenchSettingTab extends PluginSettingTab {
         containerEl.empty();
         containerEl.addClass('ai-workbench-settings');
 
-        // API Settings
-        containerEl.createEl('h2', { text: 'API 配置' });
+        // Language Settings (at the top)
+        containerEl.createEl('h2', { text: t('settings.language') });
 
         new Setting(containerEl)
-            .setName('API 端点')
-            .setDesc('支持 OpenAI 兼容的 API 端点（必须是有效的 HTTPS URL）')
+            .setName(t('settings.language'))
+            .setDesc(t('settings.languageDesc'))
+            .addDropdown(dropdown => dropdown
+                .addOption('auto', t('settings.languageAuto'))
+                .addOption('zh-CN', t('settings.languageZhCN'))
+                .addOption('en', t('settings.languageEn'))
+                .setValue(this.plugin.settings.i18n.language)
+                .onChange(async (value: 'auto' | 'zh-CN' | 'en') => {
+                    this.plugin.settings.i18n.language = value;
+                    await this.plugin.saveSettings();
+                    // Update i18n service
+                    const obsidianLocale = (this.app.vault as any).getConfig?.('locale')?.toString();
+                    i18n.setLanguage(value, obsidianLocale);
+                    // Re-render settings to show updated language
+                    this.display();
+                }));
+
+        // API Settings
+        containerEl.createEl('h2', { text: t('settings.apiConfig') });
+
+        new Setting(containerEl)
+            .setName(t('settings.apiEndpoint'))
+            .setDesc(t('settings.apiEndpointDesc'))
             .addText(text => text
                 .setPlaceholder('https://api.openai.com/v1')
                 .setValue(this.plugin.settings.api.endpoint)
                 .onChange(debounce(async (value: string) => {
                     // 验证endpoint格式
                     if (value && !this.validateEndpoint(value)) {
-                        new Notice('API 端点必须是有效的 HTTPS URL（本地测试可使用 HTTP）');
+                        new Notice(t('validation.apiEndpointInvalid'));
                         return;
                     }
 
@@ -42,8 +64,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('API Key')
-            .setDesc('你的 API 密钥（已加密存储）')
+            .setName(t('settings.apiKey'))
+            .setDesc(t('settings.apiKeyDesc'))
             .addText(text => text
                 .setPlaceholder('sk-...')
                 .setValue(this.maskApiKey(this.plugin.settings.api.apiKey))
@@ -55,7 +77,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
 
                     // 验证API密钥格式
                     if (value && !this.validateApiKey(value)) {
-                        new Notice('API Key 格式不正确');
+                        new Notice(t('validation.apiKeyInvalid'));
                         return;
                     }
 
@@ -64,8 +86,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('模型')
-            .setDesc('使用的模型名称')
+            .setName(t('settings.model'))
+            .setDesc(t('settings.modelDesc'))
             .addText(text => text
                 .setPlaceholder('gpt-4o-mini')
                 .setValue(this.plugin.settings.api.model)
@@ -75,8 +97,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('超时时间')
-            .setDesc('请求超时时间（秒）')
+            .setName(t('settings.timeout'))
+            .setDesc(t('settings.timeoutDesc'))
             .addSlider(slider => slider
                 .setLimits(10, 300, 10)
                 .setValue(this.plugin.settings.api.timeout)
@@ -87,11 +109,11 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Image Generation Settings
-        containerEl.createEl('h2', { text: '图片生成' });
+        containerEl.createEl('h2', { text: t('settings.imageGeneration') });
 
         new Setting(containerEl)
-            .setName('图片提供商')
-            .setDesc('首版支持 OpenAI 兼容图片 API')
+            .setName(t('settings.imageProvider'))
+            .setDesc(t('settings.imageProviderDesc'))
             .addDropdown(dropdown => dropdown
                 .addOption('openai-compatible', 'OpenAI 兼容 API')
                 .setValue(this.plugin.settings.images.provider)
@@ -101,14 +123,14 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('图片 API 端点')
-            .setDesc('与文本 AI 独立配置，支持 HTTPS 或本地 HTTP 服务')
+            .setName(t('settings.imageApiEndpoint'))
+            .setDesc(t('settings.imageApiEndpointDesc'))
             .addText(text => text
-                .setPlaceholder('https://api.openai.com/v1')
+                .setPlaceholder('https://api3.wlai.vip/v1')
                 .setValue(this.plugin.settings.images.endpoint)
                 .onChange(debounce(async (value: string) => {
                     if (value && !this.validateEndpoint(value)) {
-                        new Notice('图片 API 端点必须是有效的 HTTPS URL（本地可使用 HTTP）');
+                        new Notice(t('validation.httpsRequired'));
                         return;
                     }
                     this.plugin.settings.images.endpoint = value;
@@ -116,8 +138,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('图片 API Key')
-            .setDesc('仅保存在本地插件设置中')
+            .setName(t('settings.imageApiKey'))
+            .setDesc(t('settings.imageApiKeyDesc'))
             .addText(text => text
                 .setPlaceholder('sk-...')
                 .setValue(this.maskApiKey(this.plugin.settings.images.apiKey))
@@ -128,7 +150,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('图片模型')
+            .setName(t('settings.imageModel'))
             .addText(text => text
                 .setPlaceholder('gpt-image-1')
                 .setValue(this.plugin.settings.images.model)
@@ -138,8 +160,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('图片尺寸')
-            .setDesc('由图片服务支持，例如 1536x1024')
+            .setName(t('settings.imageSize'))
+            .setDesc(t('settings.imageSizeDesc'))
             .addText(text => text
                 .setPlaceholder('1536x1024')
                 .setValue(this.plugin.settings.images.size)
@@ -149,8 +171,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }, SETTINGS_DEBOUNCE_MS)));
 
         new Setting(containerEl)
-            .setName('图片请求超时')
-            .setDesc('单位：秒')
+            .setName(t('settings.imageTimeout'))
+            .setDesc(t('settings.imageTimeoutDesc'))
             .addSlider(slider => slider
                 .setLimits(30, 300, 10)
                 .setValue(this.plugin.settings.images.timeout)
@@ -161,7 +183,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('失败重试次数')
+            .setName(t('settings.retryCount'))
             .addSlider(slider => slider
                 .setLimits(0, 5, 1)
                 .setValue(this.plugin.settings.images.retryCount)
@@ -172,7 +194,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('并发生成数量')
+            .setName(t('settings.concurrency'))
             .addSlider(slider => slider
                 .setLimits(1, 5, 1)
                 .setValue(this.plugin.settings.images.concurrency)
@@ -183,7 +205,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('单篇最多图片数')
+            .setName(t('settings.maxImages'))
             .addSlider(slider => slider
                 .setLimits(1, 10, 1)
                 .setValue(this.plugin.settings.images.maxImages)
@@ -194,7 +216,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('生成前预览提示词')
+            .setName(t('settings.previewPrompt'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.images.previewTasks)
                 .onChange(async value => {
@@ -203,8 +225,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('保留原配图提示词')
-            .setDesc('关闭时，成功生成的图片会替换原配图区块')
+            .setName(t('settings.keepOriginalPrompts'))
+            .setDesc(t('settings.keepOriginalPromptsDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.images.keepOriginalPrompts)
                 .onChange(async value => {
@@ -213,15 +235,15 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Output Settings
-        containerEl.createEl('h2', { text: '输出设置' });
+        containerEl.createEl('h2', { text: t('settings.outputSettings') });
 
         new Setting(containerEl)
-            .setName('总结位置')
-            .setDesc('AI 生成的总结添加到笔记的位置')
+            .setName(t('settings.summaryPosition'))
+            .setDesc(t('settings.summaryPositionDesc'))
             .addDropdown(dropdown => dropdown
-                .addOption('append', '追加到末尾')
-                .addOption('prepend', '插入到开头')
-                .addOption('newFile', '新建文件')
+                .addOption('append', t('settings.summaryPositionAppend'))
+                .addOption('prepend', t('settings.summaryPositionPrepend'))
+                .addOption('newFile', t('settings.summaryPositionNewFile'))
                 .setValue(this.plugin.settings.output.summaryPosition)
                 .onChange(async (value: 'append' | 'prepend' | 'newFile') => {
                     this.plugin.settings.output.summaryPosition = value;
@@ -229,12 +251,12 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('输出语言')
-            .setDesc('翻译等功能的默认语言')
+            .setName(t('settings.outputLanguage'))
+            .setDesc(t('settings.outputLanguageDesc'))
             .addDropdown(dropdown => dropdown
-                .addOption('auto', '自动检测')
-                .addOption('zh', '中文')
-                .addOption('en', '英文')
+                .addOption('auto', t('settings.outputLanguageAuto'))
+                .addOption('zh', t('settings.outputLanguageZh'))
+                .addOption('en', t('settings.outputLanguageEn'))
                 .setValue(this.plugin.settings.output.language)
                 .onChange(async (value: 'auto' | 'zh' | 'en') => {
                     this.plugin.settings.output.language = value;
@@ -242,8 +264,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('添加时间戳')
-            .setDesc('在 AI 生成的内容前添加时间戳')
+            .setName(t('settings.addTimestamp'))
+            .setDesc(t('settings.addTimestampDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.output.includeTimestamp)
                 .onChange(async (value) => {
@@ -252,11 +274,11 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Backup Settings
-        containerEl.createEl('h2', { text: '备份设置' });
+        containerEl.createEl('h2', { text: t('settings.backupSettings') });
 
         new Setting(containerEl)
-            .setName('启用备份')
-            .setDesc('修改笔记前自动备份')
+            .setName(t('settings.enableBackup'))
+            .setDesc(t('settings.enableBackupDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.backup.enabled)
                 .onChange(async (value) => {
@@ -265,8 +287,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('最大备份数')
-            .setDesc('每个文件保留的最大备份数量')
+            .setName(t('settings.maxBackupCount'))
+            .setDesc(t('settings.maxBackupCountDesc'))
             .addSlider(slider => slider
                 .setLimits(1, 50, 1)
                 .setValue(this.plugin.settings.backup.maxCount)
@@ -277,11 +299,11 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Claudian Settings
-        containerEl.createEl('h2', { text: 'Claudian 集成' });
+        containerEl.createEl('h2', { text: t('settings.claudianIntegration') });
 
         new Setting(containerEl)
-            .setName('显示 Claudian 按钮')
-            .setDesc('在侧边栏显示"发送到 Claudian"按钮')
+            .setName(t('settings.showClaudianButton'))
+            .setDesc(t('settings.showClaudianButtonDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.claudian.showButton)
                 .onChange(async (value) => {
@@ -290,16 +312,16 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Custom Prompts Settings
-        containerEl.createEl('h2', { text: '自定义 Prompt' });
+        containerEl.createEl('h2', { text: t('settings.customPrompts') });
 
         const promptsContainer = containerEl.createDiv({ cls: 'ai-workbench-custom-prompts' });
         this.renderCustomPrompts(promptsContainer);
 
         new Setting(containerEl)
-            .setName('添加新 Prompt')
-            .setDesc('创建自定义的 AI 处理动作')
+            .setName(t('settings.addNewPrompt'))
+            .setDesc(t('settings.addNewPromptDesc'))
             .addButton(btn => btn
-                .setButtonText('新建')
+                .setButtonText(t('common.create'))
                 .onClick(() => {
                     const modal = new CustomPromptModal(this.app, async (prompt) => {
                         this.plugin.getCustomPromptsService().add(prompt);
@@ -310,7 +332,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                     modal.open();
                 }))
             .addButton(btn => btn
-                .setButtonText('导入预设')
+                .setButtonText(t('settings.importPreset'))
                 .setCta()
                 .onClick(() => {
                     this.plugin['showPresetImportModal']();
@@ -318,17 +340,17 @@ export class WorkbenchSettingTab extends PluginSettingTab {
 
         // Import/Export
         new Setting(containerEl)
-            .setName('导入/导出')
+            .setName(t('settings.importExport'))
             .addButton(btn => btn
-                .setButtonText('导出 Prompts')
+                .setButtonText(t('settings.exportPrompts'))
                 .onClick(() => {
                     const data = this.plugin.getCustomPromptsService().export();
                     const json = JSON.stringify(data, null, 2);
                     navigator.clipboard.writeText(json);
-                    new Notice('已复制到剪贴板');
+                    new Notice(t('notices.copiedToClipboard'));
                 }))
             .addButton(btn => btn
-                .setButtonText('导入 Prompts')
+                .setButtonText(t('settings.importPrompts'))
                 .onClick(() => {
                     const modal = new ImportPromptsModal(this.app, async (json) => {
                         try {
@@ -337,19 +359,19 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                             await this.plugin.saveSettings();
                             this.plugin.refreshCustomPromptCommands();
                             this.display();
-                            new Notice(`成功导入 ${count} 个 Prompt`);
+                            new Notice(t('notices.importSuccess', { count }));
                         } catch (e) {
-                            new Notice('导入失败：格式错误');
+                            new Notice(t('notices.importFailed'));
                         }
                     });
                     modal.open();
                 }));
 
         // Keyboard Shortcuts
-        containerEl.createEl('h2', { text: '快捷键' });
+        containerEl.createEl('h2', { text: t('settings.shortcuts') });
 
         new Setting(containerEl)
-            .setName('启用快捷键')
+            .setName(t('settings.enableShortcuts'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.shortcuts.enabled)
                 .onChange(async (value) => {
@@ -362,9 +384,9 @@ export class WorkbenchSettingTab extends PluginSettingTab {
         this.renderShortcuts(shortcutsContainer);
 
         new Setting(containerEl)
-            .setName('添加快捷键')
+            .setName(t('settings.addShortcut'))
             .addButton(btn => btn
-                .setButtonText('新建')
+                .setButtonText(t('common.create'))
                 .onClick(() => {
                     const modal = new ShortcutModal(
                         this.app,
@@ -380,11 +402,11 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Context Menu Settings
-        containerEl.createEl('h2', { text: '右键菜单' });
+        containerEl.createEl('h2', { text: t('settings.contextMenu') });
 
         new Setting(containerEl)
-            .setName('启用右键菜单')
-            .setDesc('在编辑器右键菜单中显示 AI 操作')
+            .setName(t('settings.enableContextMenu'))
+            .setDesc(t('settings.enableContextMenuDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.contextMenu.enabled)
                 .onChange(async (value) => {
@@ -393,8 +415,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('显示内置动作')
-            .setDesc('在右键菜单中显示总结、翻译等内置动作')
+            .setName(t('settings.showBuiltInActions'))
+            .setDesc(t('settings.showBuiltInActionsDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.contextMenu.showBuiltInActions)
                 .onChange(async (value) => {
@@ -403,8 +425,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('显示自定义 Prompt')
-            .setDesc('在右键菜单中显示自定义 Prompt')
+            .setName(t('settings.showCustomPrompts'))
+            .setDesc(t('settings.showCustomPromptsDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.contextMenu.showCustomPrompts)
                 .onChange(async (value) => {
@@ -413,15 +435,15 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Publishing platform settings
-        containerEl.createEl('h2', { text: '发布平台' });
+        containerEl.createEl('h2', { text: t('settings.publishingPlatforms') });
         new PublishingSettingsRenderer(this.app, this.plugin, containerEl).render();
 
         // UI Settings
-        containerEl.createEl('h2', { text: '界面设置' });
+        containerEl.createEl('h2', { text: t('settings.uiSettings') });
 
         new Setting(containerEl)
-            .setName('显示状态栏')
-            .setDesc('在底部状态栏显示 AI 状态')
+            .setName(t('settings.showStatusBar'))
+            .setDesc(t('settings.showStatusBarDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.ui.showStatusBar)
                 .onChange(async (value) => {
@@ -430,8 +452,8 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-            .setName('替换前确认')
-            .setDesc('替换原文前弹出确认对话框')
+            .setName(t('settings.confirmBeforeReplace'))
+            .setDesc(t('settings.confirmBeforeReplaceDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.plugin.settings.ui.confirmBeforeReplace)
                 .onChange(async (value) => {
@@ -440,25 +462,25 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 }));
 
         // Backup Management
-        containerEl.createEl('h2', { text: '备份管理' });
+        containerEl.createEl('h2', { text: t('settings.backupManagement') });
 
         new Setting(containerEl)
-            .setName('管理备份')
-            .setDesc('查看、恢复或删除备份文件')
+            .setName(t('settings.manageBackups'))
+            .setDesc(t('settings.manageBackupsDesc'))
             .addButton(btn => btn
-                .setButtonText('打开备份管理')
+                .setButtonText(t('settings.manageBackups'))
                 .onClick(() => {
                     this.plugin.getBackupManager().showBackupModal();
                 }));
 
         new Setting(containerEl)
-            .setName('清空所有备份')
+            .setName(t('settings.clearAllBackups'))
             .addButton(btn => btn
-                .setButtonText('清空')
+                .setButtonText(t('settings.clearConfirm'))
                 .setWarning()
                 .onClick(async () => {
                     const count = await this.plugin.getBackupManager().clearAll();
-                    new Notice(`已删除 ${count} 个备份`);
+                    new Notice(t('notices.backupCleared', { count }));
                 }));
     }
 
@@ -467,7 +489,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
         const prompts = this.plugin.getCustomPromptsService().getAll();
 
         if (prompts.length === 0) {
-            container.createEl('p', { text: '暂无自定义 Prompt，点击下方按钮创建', cls: 'muted' });
+            container.createEl('p', { text: t('settings.noPrompts'), cls: 'muted' });
             return;
         }
 
@@ -482,7 +504,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
 
             const actions = item.createDiv({ cls: 'prompt-actions' });
 
-            actions.createEl('button', { text: '编辑' }, btn => {
+            actions.createEl('button', { text: t('common.edit') }, btn => {
                 btn.addEventListener('click', () => {
                     const modal = new CustomPromptModal(this.app, async (updated) => {
                         this.plugin.getCustomPromptsService().update(prompt.id, updated);
@@ -493,7 +515,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 });
             });
 
-            actions.createEl('button', { text: '删除', cls: 'mod-warning' }, btn => {
+            actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
                 btn.addEventListener('click', async () => {
                     this.plugin.getCustomPromptsService().delete(prompt.id);
                     await this.plugin.saveSettings();
@@ -509,7 +531,7 @@ export class WorkbenchSettingTab extends PluginSettingTab {
         const bindings = this.plugin.settings.shortcuts.bindings;
 
         if (bindings.length === 0) {
-            container.createEl('p', { text: '暂无快捷键，点击下方按钮创建', cls: 'muted' });
+            container.createEl('p', { text: t('settings.noShortcuts'), cls: 'muted' });
             return;
         }
 
@@ -604,57 +626,57 @@ class CustomPromptModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('ai-workbench-modal');
 
-        contentEl.createEl('h3', { text: this.existingPrompt ? '编辑 Prompt' : '新建 Prompt' });
+        contentEl.createEl('h3', { text: this.existingPrompt ? t('settings.editPrompt') : t('settings.newPrompt') });
 
         new Setting(contentEl)
-            .setName('名称')
-            .setDesc('显示在按钮上的名称')
+            .setName(t('settings.promptName'))
+            .setDesc(t('settings.promptNameDesc'))
             .addText(text => text
-                .setPlaceholder('例如：润色文章')
+                .setPlaceholder(t('settings.promptNameDesc'))
                 .setValue(this.name)
                 .onChange(value => this.name = value));
 
         new Setting(contentEl)
-            .setName('描述')
-            .setDesc('简短描述这个动作的作用')
+            .setName(t('settings.promptDescription'))
+            .setDesc(t('settings.promptDescriptionDesc'))
             .addText(text => text
-                .setPlaceholder('可选')
+                .setPlaceholder(t('common.optional'))
                 .setValue(this.description)
                 .onChange(value => this.description = value));
 
         new Setting(contentEl)
-            .setName('Prompt 模板')
-            .setDesc('发送给 AI 的指令')
+            .setName(t('settings.promptTemplate'))
+            .setDesc(t('settings.promptTemplateDesc'))
             .addTextArea(text => text
                 .setPlaceholder('请帮我...')
                 .setValue(this.prompt)
                 .onChange(value => this.prompt = value));
 
         new Setting(contentEl)
-            .setName('输出方式')
+            .setName(t('settings.outputMode'))
             .addDropdown(dropdown => dropdown
-                .addOption('append', '追加到末尾')
-                .addOption('prepend', '插入到开头')
-                .addOption('newFile', '新建文件')
-                .addOption('replace', '替换原文')
-                .addOption('selection', '替换选中文字')
+                .addOption('append', t('settings.outputModeAppend'))
+                .addOption('prepend', t('settings.outputModePrepend'))
+                .addOption('newFile', t('settings.outputModeNewFile'))
+                .addOption('replace', t('settings.outputModeReplace'))
+                .addOption('selection', t('settings.outputModeSelection'))
                 .setValue(this.outputMode)
                 .onChange(value => this.outputMode = value as any));
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('取消')
+                .setButtonText(t('common.cancel'))
                 .onClick(() => this.close()))
             .addButton(btn => btn
-                .setButtonText('保存')
+                .setButtonText(t('common.save'))
                 .setCta()
                 .onClick(() => {
                     if (!this.name.trim()) {
-                        new Notice('请输入名称');
+                        new Notice(t('validation.nameRequired'));
                         return;
                     }
                     if (!this.prompt.trim()) {
-                        new Notice('请输入 Prompt');
+                        new Notice(t('validation.promptRequired'));
                         return;
                     }
                     this.onSave({
@@ -699,21 +721,21 @@ class ShortcutModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('ai-workbench-modal');
 
-        contentEl.createEl('h3', { text: '新建快捷键' });
+        contentEl.createEl('h3', { text: t('settings.newShortcut') });
 
         new Setting(contentEl)
-            .setName('动作')
+            .setName(t('settings.action'))
             .addDropdown(dropdown => {
-                dropdown.addOption('summarize', '总结');
-                dropdown.addOption('outline', '大纲');
-                dropdown.addOption('translate', '翻译');
-                dropdown.addOption('format', '格式化');
-                dropdown.addOption('mindmap', '思维导图');
-                dropdown.addOption('mermaid', 'Mermaid 思维导图');
-                dropdown.addOption('wechat-insert-images', '公众号一键插入图片');
+                dropdown.addOption('summarize', t('actions.summarize'));
+                dropdown.addOption('outline', t('actions.outline'));
+                dropdown.addOption('translate', t('actions.translate'));
+                dropdown.addOption('format', t('actions.format'));
+                dropdown.addOption('mindmap', t('actions.mindmap'));
+                dropdown.addOption('mermaid', t('actions.mermaid'));
+                dropdown.addOption('wechat-insert-images', t('actions.wechatInsertImages'));
 
                 for (const prompt of this.customPrompts) {
-                    dropdown.addOption(`custom:${prompt.id}`, `自定义: ${prompt.name}`);
+                    dropdown.addOption(`custom:${prompt.id}`, `${t('actions.custom')}: ${prompt.name}`);
                 }
 
                 dropdown.onChange(value => {
@@ -728,16 +750,16 @@ class ShortcutModal extends Modal {
             });
 
         new Setting(contentEl)
-            .setName('按键')
-            .setDesc('按下要绑定的键')
+            .setName(t('settings.key'))
+            .setDesc(t('settings.keyDesc'))
             .addText(text => text
-                .setPlaceholder('例如：S')
+                .setPlaceholder('S')
                 .setValue(this.key)
                 .onChange(value => this.key = value.toUpperCase()));
 
         new Setting(contentEl)
-            .setName('修饰键')
-            .setDesc('选择需要按下的修饰键')
+            .setName(t('settings.modifiers'))
+            .setDesc(t('settings.modifiersDesc'))
             .addToggle(toggle => toggle
                 .setTooltip('Ctrl / ⌘')
                 .setValue(this.modifiers.includes('Ctrl'))
@@ -771,14 +793,14 @@ class ShortcutModal extends Modal {
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('取消')
+                .setButtonText(t('common.cancel'))
                 .onClick(() => this.close()))
             .addButton(btn => btn
-                .setButtonText('保存')
+                .setButtonText(t('common.save'))
                 .setCta()
                 .onClick(() => {
                     if (!this.key) {
-                        new Notice('请输入按键');
+                        new Notice(t('validation.keyRequired'));
                         return;
                     }
                     this.onSave({
@@ -813,11 +835,11 @@ class ImportPromptsModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('ai-workbench-modal');
 
-        contentEl.createEl('h3', { text: '导入 Prompts' });
+        contentEl.createEl('h3', { text: t('settings.importPrompts') });
 
         new Setting(contentEl)
-            .setName('JSON 数据')
-            .setDesc('粘贴导出的 Prompts JSON')
+            .setName('JSON')
+            .setDesc(t('validation.jsonDataRequired'))
             .addTextArea(text => text
                 .setPlaceholder('[{...}]')
                 .setValue(this.json)
@@ -825,14 +847,14 @@ class ImportPromptsModal extends Modal {
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('取消')
+                .setButtonText(t('common.cancel'))
                 .onClick(() => this.close()))
             .addButton(btn => btn
-                .setButtonText('导入')
+                .setButtonText(t('common.import'))
                 .setCta()
                 .onClick(() => {
                     if (!this.json.trim()) {
-                        new Notice('请粘贴 JSON 数据');
+                        new Notice(t('validation.jsonDataRequired'));
                         return;
                     }
                     this.onImport(this.json);

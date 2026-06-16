@@ -4,6 +4,7 @@
 
 import { App, TFile, TFolder, Modal, Setting, Notice } from 'obsidian';
 import { BackupSettings } from '../types';
+import { t } from '../i18n';
 
 interface BackupInfo {
     path: string;
@@ -105,7 +106,7 @@ export class BackupManager {
 
             const backupFile = vault.getAbstractFileByPath(backupPath);
             if (!(backupFile instanceof TFile)) {
-                new Notice('备份文件不存在');
+                new Notice(t('backup.backupInfo'));
                 return false;
             }
 
@@ -118,11 +119,11 @@ export class BackupManager {
                 await vault.create(targetPath, content);
             }
 
-            new Notice('已从备份恢复');
+            new Notice(t('backup.restoreBackup'));
             return true;
         } catch (error) {
             console.error('Restore failed:', error);
-            new Notice('恢复失败');
+            new Notice(t('errors.unknownError'));
             return false;
         }
     }
@@ -188,7 +189,7 @@ class BackupListModal extends Modal {
         const { contentEl } = this;
         contentEl.addClass('ai-workbench-backup-modal');
 
-        contentEl.createEl('h3', { text: '备份管理' });
+        contentEl.createEl('h3', { text: t('settings.backupManagement') });
 
         // Load backups
         this.backups = await this.manager.listBackups();
@@ -202,7 +203,7 @@ class BackupListModal extends Modal {
             : this.backups;
 
         if (filteredBackups.length === 0) {
-            contentEl.createEl('p', { text: '暂无备份', cls: 'muted' });
+            contentEl.createEl('p', { text: t('backup.noBackups'), cls: 'muted' });
         } else {
             const list = contentEl.createDiv({ cls: 'backup-list' });
 
@@ -217,7 +218,7 @@ class BackupListModal extends Modal {
 
                 const actions = item.createDiv({ cls: 'backup-actions' });
 
-                actions.createEl('button', { text: '查看' }, btn => {
+                actions.createEl('button', { text: t('common.edit') }, btn => {
                     btn.addEventListener('click', async () => {
                         const file = this.app.vault.getAbstractFileByPath(backup.path);
                         if (file instanceof TFile) {
@@ -226,10 +227,10 @@ class BackupListModal extends Modal {
                     });
                 });
 
-                actions.createEl('button', { text: '删除', cls: 'mod-warning' }, btn => {
+                actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
                     btn.addEventListener('click', async () => {
                         await this.manager.delete(backup.path);
-                        new Notice('已删除备份');
+                        new Notice(t('backup.deleteBackup'));
                         this.onOpen(); // Refresh
                     });
                 });
@@ -238,13 +239,13 @@ class BackupListModal extends Modal {
 
         // Clear all button
         new Setting(contentEl)
-            .setName('清空所有备份')
+            .setName(t('settings.clearAllBackups'))
             .addButton(btn => btn
-                .setButtonText('清空')
+                .setButtonText(t('settings.clearConfirm'))
                 .setWarning()
                 .onClick(async () => {
                     const count = await this.manager.clearAll();
-                    new Notice(`已删除 ${count} 个备份`);
+                    new Notice(t('notices.backupCleared', { count }));
                     this.close();
                 }));
     }

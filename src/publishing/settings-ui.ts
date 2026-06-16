@@ -6,15 +6,19 @@ import {
     PublishingPlatform,
     PUBLISHING_PLATFORMS
 } from './types';
+import { t } from '../i18n';
 
-const PLATFORM_LABELS: Record<PublishingPlatform, string> = {
-    wechat: '微信公众号',
-    xiaohongshu: '小红书',
-    wechatChannels: '视频号',
-    douyin: '抖音',
-    x: 'X',
-    youtube: 'YouTube'
-};
+function getPlatformLabel(platform: PublishingPlatform): string {
+    const keys: Record<PublishingPlatform, string> = {
+        wechat: 'platforms.wechat',
+        xiaohongshu: 'platforms.xiaohongshu',
+        wechatChannels: 'platforms.wechatChannels',
+        douyin: 'platforms.douyin',
+        x: 'platforms.x',
+        youtube: 'platforms.youtube'
+    };
+    return t(keys[platform]);
+}
 
 const OFFICIAL_FIELDS: Partial<Record<PublishingPlatform, Array<{
     key: string;
@@ -50,13 +54,13 @@ export class PublishingSettingsRenderer {
         const wrapper = this.wrapper;
         wrapper.empty();
         wrapper.createEl('p', {
-            text: '平台凭据保存在本地插件数据中，但不等同于加密存储。',
+            text: t('settings.platformCredentials'),
             cls: 'setting-item-description'
         });
 
         new Setting(wrapper)
-            .setName('发布请求超时')
-            .setDesc('平台 API 与 Webhook 请求的超时时间（秒）')
+            .setName(t('settings.requestTimeout'))
+            .setDesc(t('settings.requestTimeoutDesc'))
             .addSlider(slider => slider
                 .setLimits(10, 300, 10)
                 .setDynamicTooltip()
@@ -75,11 +79,11 @@ export class PublishingSettingsRenderer {
         const platformSettings = this.plugin.settings.publishing.platforms[platform];
         const setting = new Setting(container)
             .setClass('ai-workbench-platform-setting-row')
-            .setName(PLATFORM_LABELS[platform])
+            .setName(getPlatformLabel(platform))
             .setDesc(this.statusText(platform, platformSettings));
 
         setting.addToggle(toggle => toggle
-            .setTooltip('启用平台')
+            .setTooltip(t('settings.enablePlatform'))
             .setValue(platformSettings.enabled)
             .onChange(async value => {
                 platformSettings.enabled = value;
@@ -88,8 +92,8 @@ export class PublishingSettingsRenderer {
             }));
 
         setting.addDropdown(dropdown => dropdown
-            .addOption('official', '官方 API')
-            .addOption('webhook', 'Webhook')
+            .addOption('official', t('settings.officialApi'))
+            .addOption('webhook', t('settings.webhook'))
             .setValue(platformSettings.connectionType)
             .onChange(async value => {
                 platformSettings.connectionType = value as ConnectionType;
@@ -98,32 +102,32 @@ export class PublishingSettingsRenderer {
             }));
 
         setting.addButton(button => button
-            .setButtonText('配置')
+            .setButtonText(t('common.configure'))
             .onClick(() => {
                 new PlatformConfigModal(this.app, this.plugin, platform, () => this.refresh()).open();
             }));
 
         setting.addButton(button => button
-            .setButtonText('测试连接')
+            .setButtonText(t('common.testConnection'))
             .onClick(async () => {
                 button.setDisabled(true);
                 const result = await this.plugin.getPublishingService().testConnection(platform);
                 button.setDisabled(false);
-                new Notice(`${PLATFORM_LABELS[platform]}：${result.message}`);
+                new Notice(t('notices.connectionTestSuccess', { platform: getPlatformLabel(platform) }));
                 this.refresh();
             }));
     }
 
     private statusText(platform: PublishingPlatform, settings: PlatformSettings): string {
-        if (!settings.enabled) return '未启用';
+        if (!settings.enabled) return t('settings.platformNotConfigured');
         if (settings.connectionType === 'webhook') {
-            return settings.webhook.url ? 'Webhook 已配置' : 'Webhook 待配置';
+            return settings.webhook.url ? t('settings.webhookConfigured') : t('settings.webhookPending');
         }
-        if (!OFFICIAL_FIELDS[platform]) return '当前需使用 Webhook';
+        if (!OFFICIAL_FIELDS[platform]) return t('settings.useWebhook');
         const configured = OFFICIAL_FIELDS[platform]!
             .filter(field => field.secret || field.key !== 'author' && field.key !== 'channelId')
             .every(field => Boolean(settings.official[field.key]));
-        return configured ? '官方 API 已配置' : '官方 API 待配置';
+        return configured ? t('settings.officialApiConfigured') : t('settings.officialApiPending');
     }
 
     private refresh(): void {
@@ -157,19 +161,19 @@ class PlatformConfigModal extends Modal {
     private render(): void {
         this.contentEl.empty();
         this.contentEl.addClass('ai-workbench-platform-config-modal');
-        this.contentEl.createEl('h3', { text: `${PLATFORM_LABELS[this.platform]}设置` });
+        this.contentEl.createEl('h3', { text: `${getPlatformLabel(this.platform)} ${t('settings.platformSettings')}` });
 
         new Setting(this.contentEl)
-            .setName('启用平台')
+            .setName(t('settings.enablePlatform'))
             .addToggle(toggle => toggle
                 .setValue(this.draft.enabled)
                 .onChange(value => this.draft.enabled = value));
 
         new Setting(this.contentEl)
-            .setName('接入方式')
+            .setName(t('settings.connectionType'))
             .addDropdown(dropdown => dropdown
-                .addOption('official', '官方 API')
-                .addOption('webhook', 'Webhook')
+                .addOption('official', t('settings.officialApi'))
+                .addOption('webhook', t('settings.webhook'))
                 .setValue(this.draft.connectionType)
                 .onChange(value => {
                     this.draft.connectionType = value as ConnectionType;
@@ -177,8 +181,8 @@ class PlatformConfigModal extends Modal {
                 }));
 
         new Setting(this.contentEl)
-            .setName('工作台默认选中')
-            .setDesc('打开工作台时默认勾选此平台')
+            .setName(t('settings.defaultSelected'))
+            .setDesc(t('settings.defaultSelectedDesc'))
             .addToggle(toggle => toggle
                 .setValue(this.defaultSelected)
                 .onChange(value => this.defaultSelected = value));
@@ -192,10 +196,10 @@ class PlatformConfigModal extends Modal {
 
         new Setting(this.contentEl)
             .addButton(button => button
-                .setButtonText('取消')
+                .setButtonText(t('common.cancel'))
                 .onClick(() => this.close()))
             .addButton(button => button
-                .setButtonText('保存')
+                .setButtonText(t('common.save'))
                 .setCta()
                 .onClick(async () => {
                     this.plugin.settings.publishing.platforms[this.platform] = this.draft;
@@ -216,7 +220,7 @@ class PlatformConfigModal extends Modal {
         const fields = OFFICIAL_FIELDS[this.platform];
         if (!fields) {
             container.createEl('p', {
-                text: `${PLATFORM_LABELS[this.platform]}当前不提供本插件可用的草稿接口，请改用 Webhook。`,
+                text: `${getPlatformLabel(this.platform)} ${t('settings.noOfficialApi')}`,
                 cls: 'ai-workbench-platform-status'
             });
             return;
@@ -235,27 +239,27 @@ class PlatformConfigModal extends Modal {
 
     private renderWebhookFields(container: HTMLElement): void {
         new Setting(container)
-            .setName('Webhook URL')
-            .setDesc('必须使用 HTTPS；localhost 可使用 HTTP')
+            .setName(t('settings.webhookUrl'))
+            .setDesc(t('settings.webhookUrlDesc'))
             .addText(text => text
                 .setPlaceholder('https://relay.example.com/draft')
                 .setValue(this.draft.webhook.url)
                 .onChange(value => this.draft.webhook.url = value.trim()));
 
         new Setting(container)
-            .setName('媒体上传 URL')
-            .setDesc('发布本地图片或视频时必填')
+            .setName(t('settings.mediaUploadUrl'))
+            .setDesc(t('settings.mediaUploadUrlDesc'))
             .addText(text => text
                 .setPlaceholder('https://relay.example.com/media')
                 .setValue(this.draft.webhook.mediaUploadUrl)
                 .onChange(value => this.draft.webhook.mediaUploadUrl = value.trim()));
 
         new Setting(container)
-            .setName('认证方式')
+            .setName(t('settings.authType'))
             .addDropdown(dropdown => dropdown
-                .addOption('none', '无')
-                .addOption('bearer', 'Bearer Token')
-                .addOption('headers', '自定义请求头')
+                .addOption('none', t('settings.authTypeNone'))
+                .addOption('bearer', t('settings.authTypeBearer'))
+                .addOption('headers', t('settings.authTypeHeaders'))
                 .setValue(this.draft.webhook.authType)
                 .onChange(value => {
                     this.draft.webhook.authType = value as PlatformSettings['webhook']['authType'];
@@ -264,7 +268,7 @@ class PlatformConfigModal extends Modal {
 
         if (this.draft.webhook.authType === 'bearer') {
             new Setting(container)
-                .setName('Bearer Token')
+                .setName(t('settings.bearerToken'))
                 .addText(text => {
                     text.setValue(this.draft.webhook.token)
                         .onChange(value => this.draft.webhook.token = value);
@@ -274,8 +278,8 @@ class PlatformConfigModal extends Modal {
 
         if (this.draft.webhook.authType === 'headers') {
             new Setting(container)
-                .setName('自定义请求头 JSON')
-                .setDesc('例如 {"X-API-Key":"value"}')
+                .setName(t('settings.customHeadersJson'))
+                .setDesc(t('settings.customHeadersDesc'))
                 .addTextArea(text => text
                     .setValue(JSON.stringify(this.draft.webhook.headers, null, 2))
                     .onChange(value => {
@@ -291,8 +295,8 @@ class PlatformConfigModal extends Modal {
         }
 
         new Setting(container)
-            .setName('签名密钥')
-            .setDesc('用于 HMAC-SHA256 请求签名，可留空')
+            .setName(t('settings.signingSecret'))
+            .setDesc(t('settings.signingSecretDesc'))
             .addText(text => {
                 text.setValue(this.draft.webhook.signingSecret)
                     .onChange(value => this.draft.webhook.signingSecret = value);

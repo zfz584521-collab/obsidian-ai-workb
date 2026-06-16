@@ -44,28 +44,33 @@ test('Obsidian content extractor exposes a narrow service interface', () => {
 });
 
 test('settings expose publishing platforms and connection controls', () => {
-    assert.match(settingsSource, /发布平台/);
+    // Check for i18n function calls instead of hardcoded strings
+    assert.match(settingsSource, /publishingPlatforms/);
     assert.match(publishingSettingsSource, /connectionType/);
-    assert.match(publishingSettingsSource, /测试连接/);
+    assert.match(publishingSettingsSource, /testConnection/);
     assert.match(publishingSettingsSource, /mediaUploadUrl/);
     assert.match(styles, /\.ai-workbench-platform-settings/);
 });
 
 test('publish modal supports unified content, platform overrides, and failed retry', () => {
-    assert.match(modalSource, /统一内容/);
-    assert.match(modalSource, /平台设置/);
-    assert.match(modalSource, /仅重试失败平台/);
-    assert.match(modalSource, /已覆盖/);
+    // Check for i18n function calls instead of hardcoded strings
+    assert.match(modalSource, /unifiedContent/);
+    assert.match(modalSource, /platformSettings/);
+    assert.match(modalSource, /retryFailed/);
+    assert.match(modalSource, /overridden/);
     assert.match(styles, /\.ai-workbench-publish-modal/);
     assert.match(styles, /\.ai-workbench-publish-result-row/);
 });
 
 test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /ai-workbench-publishing/);
-    assert.match(mainSource, /编辑并发布/);
-    for (const platform of ['微信公众号', '小红书', '视频号', '抖音', 'X', 'YouTube']) {
-        assert.match(mainSource, new RegExp(platform));
-    }
+    // Check for i18n keys instead of hardcoded platform names
+    assert.match(mainSource, /'platforms\.wechat'/);
+    assert.match(mainSource, /'platforms\.xiaohongshu'/);
+    assert.match(mainSource, /'platforms\.wechatChannels'/);
+    assert.match(mainSource, /'platforms\.douyin'/);
+    assert.match(mainSource, /'platforms\.x'/);
+    assert.match(mainSource, /'platforms\.youtube'/);
     assert.match(styles, /\.ai-workbench-platform-grid/);
     assert.match(styles, /grid-template-columns/);
 });

@@ -4,6 +4,7 @@
 
 import { App, Plugin, Menu, TFile, MarkdownView } from 'obsidian';
 import { ContextMenuSettings, ActionType, CustomPrompt } from '../types';
+import { t } from '../i18n';
 
 export class ContextMenuService {
     private app: App;
@@ -66,31 +67,32 @@ export class ContextMenuService {
 
         // Add AI Workbench section
         menu.addItem((item) => {
-            item.setTitle('AI 工作台')
+            item.setTitle(t('actions.aiWorkbench'))
                 .setIcon('sparkles')
                 .onClick(() => { });
         });
         menu.addItem(item => item
-            .setTitle('公众号一键插入图片')
+            .setTitle(t('actions.wechatInsertImages'))
             .setIcon('image-plus')
             .onClick(() => this.executeWeChatImages()));
 
         // Built-in actions
         if (this.settings.showBuiltInActions) {
-            const actions: { type: ActionType; label: string; needsSelection?: boolean }[] = [
-                { type: 'summarize', label: '总结' },
-                { type: 'outline', label: '大纲' },
-                { type: 'translate', label: '翻译' },
-                { type: 'format', label: '格式化' },
-                { type: 'mindmap', label: '思维导图' },
-                { type: 'mermaid', label: 'Mermaid' }
+            const actions: { type: ActionType; labelKey: string }[] = [
+                { type: 'summarize', labelKey: 'actions.summarize' },
+                { type: 'outline', labelKey: 'actions.outline' },
+                { type: 'translate', labelKey: 'actions.translate' },
+                { type: 'format', labelKey: 'actions.format' },
+                { type: 'mindmap', labelKey: 'actions.mindmap' },
+                { type: 'mermaid', labelKey: 'actions.mermaid' }
             ];
 
             for (const action of actions) {
                 menu.addItem((item) => {
+                    const label = t(action.labelKey);
                     const title = hasSelection
-                        ? `${action.label} (选中文字)`
-                        : action.label;
+                        ? `${label} (${t('actions.selectedText')})`
+                        : label;
 
                     item.setTitle(title)
                         .onClick(() => {
@@ -124,25 +126,25 @@ export class ContextMenuService {
      */
     private buildFileMenu(menu: Menu, file: TFile) {
         menu.addItem((item) => {
-            item.setTitle('AI 工作台')
+            item.setTitle(t('actions.aiWorkbench'))
                 .setIcon('sparkles')
                 .onClick(() => { });
         });
         menu.addItem(item => item
-            .setTitle('公众号一键插入图片')
+            .setTitle(t('actions.wechatInsertImages'))
             .setIcon('image-plus')
             .onClick(() => this.executeWeChatImages(file)));
 
         if (this.settings.showBuiltInActions) {
-            const actions: { type: ActionType; label: string }[] = [
-                { type: 'summarize', label: '总结' },
-                { type: 'translate', label: '翻译' },
-                { type: 'mindmap', label: '思维导图' }
+            const actions: { type: ActionType; labelKey: string }[] = [
+                { type: 'summarize', labelKey: 'actions.summarize' },
+                { type: 'translate', labelKey: 'actions.translate' },
+                { type: 'mindmap', labelKey: 'actions.mindmap' }
             ];
 
             for (const action of actions) {
                 menu.addItem((item) => {
-                    item.setTitle(action.label)
+                    item.setTitle(t(action.labelKey))
                         .onClick(async () => {
                             // Open the file first
                             await this.app.workspace.getLeaf().openFile(file);

@@ -3,6 +3,7 @@
  */
 
 import { App, Modal, Setting, ButtonComponent } from 'obsidian';
+import { t } from '../i18n';
 
 export class PreviewService {
     private app: App;
@@ -85,9 +86,9 @@ class PreviewModal extends Modal {
         // Tab container
         const tabs = contentEl.createDiv({ cls: 'preview-tabs' });
 
-        const tabOriginal = tabs.createEl('button', { text: '原文', cls: 'preview-tab active' });
-        const tabResult = tabs.createEl('button', { text: 'AI 结果', cls: 'preview-tab' });
-        const tabCompare = tabs.createEl('button', { text: '对比', cls: 'preview-tab' });
+        const tabOriginal = tabs.createEl('button', { text: t('preview.original'), cls: 'preview-tab active' });
+        const tabResult = tabs.createEl('button', { text: t('preview.aiResult'), cls: 'preview-tab' });
+        const tabCompare = tabs.createEl('button', { text: t('preview.compare'), cls: 'preview-tab' });
 
         // Content area
         const content = contentEl.createDiv({ cls: 'preview-content' });
@@ -107,11 +108,11 @@ class PreviewModal extends Modal {
             content.createDiv({ cls: 'preview-compare' });
 
             const left = content.createDiv({ cls: 'compare-side' });
-            left.createEl('h4', { text: '原文' });
+            left.createEl('h4', { text: t('preview.original') });
             left.createEl('pre', { text: this.original.slice(0, 1000) });
 
             const right = content.createDiv({ cls: 'compare-side' });
-            right.createEl('h4', { text: 'AI 结果' });
+            right.createEl('h4', { text: t('preview.aiResult') });
             right.createEl('pre', { text: this.result.slice(0, 1000) });
         };
 
@@ -142,13 +143,13 @@ class PreviewModal extends Modal {
         // Action buttons
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('取消')
+                .setButtonText(t('common.cancel'))
                 .onClick(() => {
                     this.accepted = false;
                     this.close();
                 }))
             .addButton(btn => btn
-                .setButtonText('接受')
+                .setButtonText(t('common.confirm'))
                 .setCta()
                 .onClick(() => {
                     this.accepted = true;
@@ -197,16 +198,16 @@ class DiffModal extends Modal {
         const container = contentEl.createDiv({ cls: 'diff-container' });
 
         const left = container.createDiv({ cls: 'diff-side' });
-        left.createEl('h4', { text: '原文' });
+        left.createEl('h4', { text: t('preview.original') });
         left.createEl('pre', { text: this.original });
 
         const right = container.createDiv({ cls: 'diff-side' });
-        right.createEl('h4', { text: '修改后' });
+        right.createEl('h4', { text: t('preview.modified') });
         right.createEl('pre', { text: this.modified });
 
         new Setting(contentEl)
             .addButton(btn => btn
-                .setButtonText('关闭')
+                .setButtonText(t('common.close'))
                 .setCta()
                 .onClick(() => this.close()));
     }

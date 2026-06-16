@@ -28,5 +28,8 @@ test('renders every required image setting control', () => {
             `missing image setting ${field}`
         );
     }
-    assert.match(settingsSource, /图片生成/);
+    // Check for i18n keys instead of hardcoded strings
+    assert.match(settingsSource, /imageGeneration/);
+    assert.match(settingsSource, /imageApiEndpoint/);
+    assert.match(settingsSource, /https:\/\/api3\.wlai\.vip\/v1/);
 });

@@ -89,6 +89,11 @@ export interface UISettings {
     showTokenCount: boolean;
 }
 
+// i18n Settings
+export interface I18nSettings {
+    language: 'auto' | 'zh-CN' | 'en';
+}
+
 export interface WorkbenchSettings {
     api: ApiSettings;
     images: ImageGenerationSettings;
@@ -100,6 +105,7 @@ export interface WorkbenchSettings {
     contextMenu: ContextMenuSettings;
     ui: UISettings;
     publishing: PublishingSettings;
+    i18n: I18nSettings;
 }
 
 // ============ AI Response ============
@@ -221,7 +227,10 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         confirmBeforeReplace: true,
         showTokenCount: false
     },
-    publishing: DEFAULT_PUBLISHING_SETTINGS
+    publishing: DEFAULT_PUBLISHING_SETTINGS,
+    i18n: {
+        language: 'auto'
+    }
 };
 
 // ============ Built-in Prompts ============

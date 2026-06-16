@@ -15,15 +15,19 @@ import {
     PublishingPlatform,
     PublishTaskResult
 } from './types';
+import { t } from '../i18n';
 
-const PLATFORM_LABELS: Record<PublishingPlatform, string> = {
-    wechat: '微信公众号',
-    xiaohongshu: '小红书',
-    wechatChannels: '视频号',
-    douyin: '抖音',
-    x: 'X',
-    youtube: 'YouTube'
-};
+function getPlatformLabel(platform: PublishingPlatform): string {
+    const keys: Record<PublishingPlatform, string> = {
+        wechat: 'platforms.wechat',
+        xiaohongshu: 'platforms.xiaohongshu',
+        wechatChannels: 'platforms.wechatChannels',
+        douyin: 'platforms.douyin',
+        x: 'platforms.x',
+        youtube: 'platforms.youtube'
+    };
+    return t(keys[platform]);
+}
 
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']);
 const VIDEO_EXTENSIONS = new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']);
@@ -99,17 +103,17 @@ export class PublishEditorModal extends Modal {
     private render(): void {
         this.contentEl.empty();
         this.contentEl.addClass('ai-workbench-publish-modal');
-        this.contentEl.createEl('h2', { text: '发布到草稿箱' });
+        this.contentEl.createEl('h2', { text: t('publishing.publishToDraft') });
         this.contentEl.createEl('p', {
-            text: `已选择 ${this.state.platforms.length} 个平台。提交只创建草稿或等价的非公开内容。`,
+            text: t('publishing.selectedPlatforms', { count: this.state.platforms.length }),
             cls: 'setting-item-description'
         });
 
         const layout = this.contentEl.createDiv({ cls: 'ai-workbench-publish-layout' });
         const editor = layout.createDiv({ cls: 'ai-workbench-publish-editor' });
-        editor.createEl('h3', { text: '统一内容' });
+        editor.createEl('h3', { text: t('publishing.unifiedContent') });
         this.renderBaseEditor(editor);
-        editor.createEl('h3', { text: '平台设置' });
+        editor.createEl('h3', { text: t('publishing.platformSettings') });
         this.renderPlatformEditor(editor);
 
         const side = layout.createDiv({ cls: 'ai-workbench-publish-side' });
@@ -120,26 +124,26 @@ export class PublishEditorModal extends Modal {
 
     private renderBaseEditor(container: HTMLElement): void {
         new Setting(container)
-            .setName('标题')
+            .setName(t('publishing.title'))
             .addText(text => text
                 .setValue(this.state.base.title)
                 .onChange(value => this.state.base.title = value));
 
         new Setting(container)
-            .setName('正文')
+            .setName(t('publishing.body'))
             .addTextArea(text => text
                 .setValue(this.state.base.bodyMarkdown)
                 .onChange(value => this.state.base.bodyMarkdown = value));
 
         new Setting(container)
-            .setName('摘要')
+            .setName(t('publishing.summary'))
             .addTextArea(text => text
                 .setValue(this.state.base.summary || '')
                 .onChange(value => this.state.base.summary = value));
 
         new Setting(container)
-            .setName('标签')
-            .setDesc('使用逗号分隔')
+            .setName(t('publishing.tags'))
+            .setDesc(t('publishing.tagsDesc'))
             .addText(text => text
                 .setValue(this.state.base.tags.join(', '))
                 .onChange(value => this.state.base.tags = parseTags(value)));
@@ -149,7 +153,7 @@ export class PublishEditorModal extends Modal {
         const tabs = container.createDiv({ cls: 'ai-workbench-publish-tabs' });
         for (const platform of this.state.platforms) {
             const tab = tabs.createEl('button', {
-                text: PLATFORM_LABELS[platform],
+                text: getPlatformLabel(platform),
                 cls: platform === this.activePlatform ? 'is-active' : ''
             });
             tab.addEventListener('click', () => {
@@ -159,9 +163,9 @@ export class PublishEditorModal extends Modal {
         }
 
         const panel = container.createDiv({ cls: 'ai-workbench-platform-override' });
-        this.renderOverrideField(panel, 'title', '平台标题', false);
-        this.renderOverrideField(panel, 'bodyMarkdown', '平台正文', true);
-        this.renderOverrideField(panel, 'summary', '平台摘要', true);
+        this.renderOverrideField(panel, 'title', t('publishing.platformTitle'), false);
+        this.renderOverrideField(panel, 'bodyMarkdown', t('publishing.platformBody'), true);
+        this.renderOverrideField(panel, 'summary', t('publishing.platformSummary'), true);
         this.renderOverrideTags(panel);
         this.renderMediaOverride(panel);
     }
@@ -177,7 +181,7 @@ export class PublishEditorModal extends Modal {
         const resolved = this.state.resolve(platform);
         const setting = new Setting(container)
             .setName(label)
-            .setDesc(enabled ? '已覆盖' : '继承统一内容')
+            .setDesc(enabled ? t('publishing.overridden') : t('publishing.inherited'))
             .addToggle(toggle => toggle
                 .setValue(enabled)
                 .onChange(value => {
@@ -208,8 +212,8 @@ export class PublishEditorModal extends Modal {
         const enabled = this.state.hasOverride(platform, 'tags');
         const resolved = this.state.resolve(platform);
         new Setting(container)
-            .setName('平台标签')
-            .setDesc(enabled ? '已覆盖' : '继承统一内容')
+            .setName(t('publishing.platformTags'))
+            .setDesc(enabled ? t('publishing.overridden') : t('publishing.inherited'))
             .addToggle(toggle => toggle
                 .setValue(enabled)
                 .onChange(value => {
@@ -232,8 +236,8 @@ export class PublishEditorModal extends Modal {
             this.state.hasOverride(platform, 'cover') ||
             this.state.hasOverride(platform, 'video');
         new Setting(container)
-            .setName('平台媒体')
-            .setDesc(overridden ? '已覆盖' : '继承统一内容')
+            .setName(t('publishing.platformMedia'))
+            .setDesc(overridden ? t('publishing.overridden') : t('publishing.inherited'))
             .addToggle(toggle => toggle
                 .setValue(overridden)
                 .onChange(value => {
@@ -261,25 +265,25 @@ export class PublishEditorModal extends Modal {
         content: PublishContent,
         platformOverride: boolean
     ): void {
-        container.createEl('h3', { text: platformOverride ? '平台媒体' : '封面与媒体' });
+        container.createEl('h3', { text: platformOverride ? t('publishing.platformMedia') : t('publishing.coverAndMedia') });
         const list = container.createDiv({ cls: 'ai-workbench-media-list' });
         if (content.images.length === 0 && !content.video) {
-            list.createEl('p', { text: '暂无媒体', cls: 'setting-item-description' });
+            list.createEl('p', { text: t('publishing.noMedia'), cls: 'setting-item-description' });
         }
 
         content.images.forEach((image, index) => {
             const row = list.createDiv({ cls: 'ai-workbench-media-row' });
             row.createEl('span', {
-                text: `${content.cover?.path === image.path ? '封面 · ' : ''}${image.name}`
+                text: `${content.cover?.path === image.path ? t('publishing.cover') + ' · ' : ''}${image.name}`
             });
-            const coverButton = row.createEl('button', { text: '设为封面' });
+            const coverButton = row.createEl('button', { text: t('publishing.setAsCover') });
             coverButton.addEventListener('click', () => {
                 this.updateMediaContent(platformOverride, current => ({
                     ...current,
                     cover: image
                 }));
             });
-            const removeButton = row.createEl('button', { text: '移除' });
+            const removeButton = row.createEl('button', { text: t('publishing.remove') });
             removeButton.addEventListener('click', () => {
                 this.updateMediaContent(platformOverride, current => {
                     const images = current.images.filter((_item, itemIndex) => itemIndex !== index);
@@ -294,8 +298,8 @@ export class PublishEditorModal extends Modal {
 
         if (content.video) {
             const row = list.createDiv({ cls: 'ai-workbench-media-row' });
-            row.createEl('span', { text: `视频 · ${content.video.name}` });
-            const removeButton = row.createEl('button', { text: '移除' });
+            row.createEl('span', { text: `${t('publishing.video')} · ${content.video.name}` });
+            const removeButton = row.createEl('button', { text: t('publishing.remove') });
             removeButton.addEventListener('click', () => {
                 this.updateMediaContent(platformOverride, current => ({
                     ...current,
@@ -305,7 +309,7 @@ export class PublishEditorModal extends Modal {
         }
 
         const mediaActions = container.createDiv({ cls: 'ai-workbench-media-actions' });
-        const addImage = mediaActions.createEl('button', { text: '添加图片' });
+        const addImage = mediaActions.createEl('button', { text: t('publishing.addImage') });
         addImage.addEventListener('click', () => {
             new VaultMediaPicker(this.app, 'image', media => {
                 this.updateMediaContent(platformOverride, current => ({
@@ -315,7 +319,7 @@ export class PublishEditorModal extends Modal {
                 }));
             }).open();
         });
-        const addVideo = mediaActions.createEl('button', { text: '选择视频' });
+        const addVideo = mediaActions.createEl('button', { text: t('publishing.selectVideo') });
         addVideo.addEventListener('click', () => {
             new VaultMediaPicker(this.app, 'video', media => {
                 this.updateMediaContent(platformOverride, current => ({
@@ -345,11 +349,11 @@ export class PublishEditorModal extends Modal {
     private renderResults(container: HTMLElement): void {
         if (this.submitting) {
             const progress = container.createDiv({ cls: 'ai-workbench-publish-results' });
-            progress.createEl('h3', { text: '发布进度' });
+            progress.createEl('h3', { text: t('publishing.publishProgress') });
             for (const platform of this.state.platforms) {
                 progress.createDiv({
                     cls: 'ai-workbench-publish-result-row',
-                    text: `${PLATFORM_LABELS[platform]} · 提交中`
+                    text: `${getPlatformLabel(platform)} · ${t('publishing.submitting')}`
                 });
             }
             return;
@@ -357,23 +361,23 @@ export class PublishEditorModal extends Modal {
         if (!this.lastResult) return;
 
         const results = container.createDiv({ cls: 'ai-workbench-publish-results' });
-        results.createEl('h3', { text: '发布结果' });
+        results.createEl('h3', { text: t('publishing.publishResults') });
         for (const platform of this.lastResult.platforms) {
             const result = this.lastResult.results[platform];
             const row = results.createDiv({ cls: 'ai-workbench-publish-result-row' });
-            row.createEl('strong', { text: PLATFORM_LABELS[platform] });
+            row.createEl('strong', { text: getPlatformLabel(platform) });
             row.createEl('span', {
                 text: result?.success
-                    ? `成功 · ${targetKindLabel(result.targetKind)}`
-                    : `失败 · ${result?.error?.message || '未知错误'}`,
+                    ? `${t('notices.success')} · ${targetKindLabel(result.targetKind)}`
+                    : `${t('notices.failed')} · ${result?.error?.message || t('publishing.unknownError')}`,
                 cls: result?.success ? 'is-success' : 'is-error'
             });
             if (result?.draftId) {
-                row.createEl('span', { text: `草稿 ID: ${result.draftId}` });
+                row.createEl('span', { text: t('publishing.draftId', { id: result.draftId }) });
             }
             if (result?.managementUrl) {
                 row.createEl('a', {
-                    text: '打开管理页面',
+                    text: t('publishing.openManagement'),
                     href: result.managementUrl
                 });
             }
@@ -383,13 +387,13 @@ export class PublishEditorModal extends Modal {
     private renderActions(): void {
         const actions = this.contentEl.createDiv({ cls: 'ai-workbench-publish-actions' });
         if (this.lastResult && this.lastResult.status !== 'success') {
-            const retry = actions.createEl('button', { text: '仅重试失败平台' });
+            const retry = actions.createEl('button', { text: t('publishing.retryFailed') });
             retry.addEventListener('click', () => this.retryFailed());
         }
-        const cancel = actions.createEl('button', { text: '关闭' });
+        const cancel = actions.createEl('button', { text: t('common.close') });
         cancel.addEventListener('click', () => this.close());
         const submit = actions.createEl('button', {
-            text: `发布 ${this.state.platforms.length} 个草稿`,
+            text: t('publishing.publishDrafts', { count: this.state.platforms.length }),
             cls: 'mod-cta'
         });
         submit.disabled = this.submitting || this.state.platforms.length === 0;
@@ -410,7 +414,7 @@ export class PublishEditorModal extends Modal {
             this.lastResult = await this.publishingService.publishAll(input);
             new Notice(resultNotice(this.lastResult));
         } catch {
-            new Notice('媒体载入失败，请检查文件是否仍然存在');
+            new Notice(t('notices.mediaLoadFailed'));
         } finally {
             this.submitting = false;
             this.render();
@@ -487,7 +491,7 @@ class VaultMediaPicker extends FuzzySuggestModal<TFile> {
         private onChoose: (media: PublishMedia) => void
     ) {
         super(app);
-        this.setPlaceholder(kind === 'image' ? '选择 Vault 图片' : '选择 Vault 视频');
+        this.setPlaceholder(kind === 'image' ? t('publishing.selectImagePlaceholder') : t('publishing.selectVideoPlaceholder'));
     }
 
     getItems(): TFile[] {
@@ -539,13 +543,13 @@ function mimeType(extension: string): string | undefined {
 }
 
 function targetKindLabel(kind?: string): string {
-    if (kind === 'native-draft') return '原生草稿';
-    if (kind === 'private-upload') return '私密上传';
-    return 'Webhook 草稿';
+    if (kind === 'native-draft') return t('publishing.nativeDraft');
+    if (kind === 'private-upload') return t('publishing.privateUpload');
+    return t('publishing.webhookDraft');
 }
 
 function resultNotice(result: PublishTaskResult): string {
-    if (result.status === 'success') return '全部平台草稿创建成功';
-    if (result.status === 'partial') return '部分平台成功，可重试失败平台';
-    return '草稿创建失败，请查看各平台结果';
+    if (result.status === 'success') return t('notices.allSuccess');
+    if (result.status === 'partial') return t('notices.partialFailed');
+    return t('notices.allFailed');
 }

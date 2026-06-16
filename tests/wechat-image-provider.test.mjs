@@ -142,3 +142,15 @@ test('aborts timed out requests as retryable failures', async () => {
         error => error instanceof ImageProviderError && error.retryable
     );
 });
+
+test('production wiring uses the Obsidian CORS-free request transport', async () => {
+    const mainSource = await import('node:fs/promises')
+        .then(fs => fs.readFile(new URL('../main.ts', import.meta.url), 'utf8'));
+
+    assert.match(mainSource, /requestUrl/);
+    assert.match(mainSource, /createObsidianImageFetch\(requestUrl\)/);
+    assert.match(
+        mainSource,
+        /new OpenAICompatibleImageProvider\(value,\s*imageFetch\)/
+    );
+});

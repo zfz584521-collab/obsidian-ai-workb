@@ -13,7 +13,8 @@ import {
     MarkdownView,
     Modal,
     Setting,
-    setIcon
+    setIcon,
+    requestUrl
 } from 'obsidian';
 import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt } from './src/types';
 import { AIService } from './src/services/ai';
@@ -35,6 +36,8 @@ import { WorkbenchSettingTab } from './src/settings';
 import { MAX_HISTORY_ENTRIES } from './src/constants';
 import { WeChatImageWorkflow } from './src/wechat-images/workflow';
 import { ImageTaskPreviewService } from './src/wechat-images/task-preview';
+import { OpenAICompatibleImageProvider } from './src/wechat-images/image-provider';
+import { createObsidianImageFetch } from './src/wechat-images/obsidian-http';
 import { mergePublishingSettings } from './src/publishing/defaults';
 import {
     PUBLISHING_PLATFORMS,
@@ -46,6 +49,7 @@ import { WebhookClient } from './src/publishing/webhook';
 import { PublishingAdapterFactory } from './src/publishing/adapters';
 import { PublishingService } from './src/publishing/service';
 import { PublishEditorModal } from './src/publishing/modal';
+import { i18n, t } from './src/i18n';
 
 const VIEW_TYPE = 'ai-workbench-view';
 
@@ -74,6 +78,10 @@ export default class AIWorkbenchPlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
+
+        // Initialize i18n
+        const obsidianLocale = (this.app.vault as any).getConfig?.('locale')?.toString();
+        i18n.setLanguage(this.settings.i18n.language, obsidianLocale);
 
         // Initialize services
         this.aiService = new AIService(this.settings.api);
@@ -109,13 +117,15 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.fileService,
             this.settings
         );
+        const imageFetch = createObsidianImageFetch(requestUrl);
         this.weChatImageWorkflow = new WeChatImageWorkflow(
             this.app,
             this.aiService,
             this.fileService,
             this.statusBarService,
             new ImageTaskPreviewService(this.app),
-            this.settings.images
+            this.settings.images,
+            value => new OpenAICompatibleImageProvider(value, imageFetch)
         );
 
         // Context menu
@@ -255,7 +265,8 @@ export default class AIWorkbenchPlugin extends Plugin {
             shortcuts: { ...DEFAULT_SETTINGS.shortcuts, ...saved?.shortcuts },
             contextMenu: { ...DEFAULT_SETTINGS.contextMenu, ...saved?.contextMenu },
             ui: { ...DEFAULT_SETTINGS.ui, ...saved?.ui },
-            publishing: mergePublishingSettings(saved?.publishing)
+            publishing: mergePublishingSettings(saved?.publishing),
+            i18n: { ...DEFAULT_SETTINGS.i18n, ...saved?.i18n }
         };
     }
 
@@ -1073,22 +1084,25 @@ class WorkbenchView extends ItemView {
         container.empty();
 
         const header = container.createDiv({ cls: 'ai-workbench-publishing-header' });
-        header.createEl('h3', { text: '发布到草稿箱' });
+        header.createEl('h3', { text: t('publishing.publishToDraft') });
         const settingsButton = header.createEl('button', {
             cls: 'clickable-icon',
-            attr: { 'aria-label': '发布平台设置' }
+            attr: { 'aria-label': t('settings.publishingPlatforms') }
         });
         setIcon(settingsButton, 'settings');
         settingsButton.addEventListener('click', () => this.plugin.openPublishingSettings());
 
         const grid = container.createDiv({ cls: 'ai-workbench-platform-grid' });
-        const labels: Record<PublishingPlatform, string> = {
-            wechat: '微信公众号',
-            xiaohongshu: '小红书',
-            wechatChannels: '视频号',
-            douyin: '抖音',
-            x: 'X',
-            youtube: 'YouTube'
+        const getPlatformLabel = (platform: PublishingPlatform): string => {
+            const keys: Record<PublishingPlatform, string> = {
+                wechat: 'platforms.wechat',
+                xiaohongshu: 'platforms.xiaohongshu',
+                wechatChannels: 'platforms.wechatChannels',
+                douyin: 'platforms.douyin',
+                x: 'platforms.x',
+                youtube: 'platforms.youtube'
+            };
+            return t(keys[platform]);
         };
         for (const platform of PUBLISHING_PLATFORMS) {
             const configured = this.plugin.isPublishingPlatformConfigured(platform);
@@ -1107,10 +1121,11 @@ class WorkbenchView extends ItemView {
             });
             const icon = button.createSpan({ cls: 'ai-workbench-platform-check' });
             setIcon(icon, selected ? 'check' : 'circle');
-            button.createSpan({ text: labels[platform] });
+            const label = getPlatformLabel(platform);
+            button.createSpan({ text: label });
             button.addEventListener('click', () => {
                 if (!configured) {
-                    new Notice(`${labels[platform]}尚未配置，请先前往设置`);
+                    new Notice(`${label} ${t('settings.platformNotConfigured')}`);
                     this.plugin.openPublishingSettings();
                     return;
                 }
