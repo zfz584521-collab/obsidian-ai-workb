@@ -62,6 +62,13 @@ test('publish modal supports unified content, platform overrides, and failed ret
     assert.match(styles, /\.ai-workbench-publish-result-row/);
 });
 
+test('publish modal gives long text fields enough editing space', () => {
+    assert.match(modalSource, /ai-workbench-publish-setting--body/);
+    assert.match(styles, /\.ai-workbench-publish-setting--long/);
+    assert.match(styles, /grid-template-columns:\s*minmax\(0,\s*1\.45fr\)\s+minmax\(360px,\s*0\.95fr\)/);
+    assert.match(styles, /\.ai-workbench-publish-setting--long[\s\S]*flex-direction:\s*column/);
+});
+
 test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /ai-workbench-publishing/);
     // Check for i18n keys instead of hardcoded platform names
@@ -73,4 +80,16 @@ test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /'platforms\.youtube'/);
     assert.match(styles, /\.ai-workbench-platform-grid/);
     assert.match(styles, /grid-template-columns/);
+});
+
+test('saving publishing settings refreshes open workbench publishing controls', () => {
+    assert.match(mainSource, /refreshWorkbenchViews\(\)/);
+    assert.match(mainSource, /getLeavesOfType\(VIEW_TYPE\)/);
+    assert.match(mainSource, /refreshPublishingControls\(\)/);
+});
+
+test('official publishing uses the Obsidian request transport', () => {
+    assert.match(mainSource, /const obsidianFetch = createObsidianImageFetch\(requestUrl\)/);
+    assert.match(mainSource, /new WebhookClient\(obsidianFetch\)/);
+    assert.match(mainSource, /new PublishingAdapterFactory\(\s*new WebhookClient\(obsidianFetch\),\s*obsidianFetch\s*\)/s);
 });

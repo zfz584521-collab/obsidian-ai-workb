@@ -345,19 +345,54 @@
 }
 
 .ai-workbench-publish-modal {
-    width: min(1000px, 92vw);
+    width: min(1240px, 96vw);
 }
 
 .ai-workbench-publish-layout {
     display: grid;
-    grid-template-columns: minmax(0, 3fr) minmax(240px, 2fr);
-    gap: 20px;
-    max-height: 70vh;
+    grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.95fr);
+    gap: 24px;
+    max-height: 72vh;
     overflow-y: auto;
+    align-items: start;
+}
+
+.ai-workbench-publish-editor,
+.ai-workbench-publish-side {
+    min-width: 0;
+}
+
+.ai-workbench-publish-setting .setting-item-control,
+.ai-workbench-publish-setting .setting-item-control input,
+.ai-workbench-publish-setting .setting-item-control textarea {
+    width: 100%;
+}
+
+.ai-workbench-publish-setting--long {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ai-workbench-publish-setting--long .setting-item-info,
+.ai-workbench-publish-setting--long .setting-item-control {
+    width: 100%;
 }
 
 .ai-workbench-publish-editor textarea {
+    resize: vertical;
+}
+
+.ai-workbench-publish-setting--body textarea {
+    min-height: 360px;
+}
+
+.ai-workbench-publish-setting--summary textarea {
     min-height: 120px;
+}
+
+.ai-workbench-platform-override .ai-workbench-publish-setting--body textarea {
+    min-height: 220px;
 }
 
 .ai-workbench-publish-tabs {

@@ -128,6 +128,8 @@ test('WeChat official adapter uploads cover before creating a native draft', asy
         : ''), ['token', 'material/add_material', 'draft/add']);
     const draftBody = JSON.parse(String(calls[2].init?.body));
     assert.equal(draftBody.articles[0].thumb_media_id, 'cover-media-id');
+    assert.match(draftBody.articles[0].content, /line-height:\s*1\.9/);
+    assert.match(draftBody.articles[0].content, /data-section-index="1"/);
     assert.doesNotMatch(JSON.stringify(result), /wx-secret|access-token/);
 });
 

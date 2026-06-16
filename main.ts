@@ -97,9 +97,13 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.statisticsService = new StatisticsService(this.app, this);
         this.helpService = new HelpService(this.app);
         this.contentExtractor = new ObsidianContentExtractor(this.app);
+        const obsidianFetch = createObsidianImageFetch(requestUrl);
         this.publishingService = new PublishingService(
             this.settings.publishing,
-            new PublishingAdapterFactory(new WebhookClient()),
+            new PublishingAdapterFactory(
+                new WebhookClient(obsidianFetch),
+                obsidianFetch
+            ),
             async entries => {
                 this.publishingHistory = entries;
                 await this.saveData({
@@ -117,7 +121,6 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.fileService,
             this.settings
         );
-        const imageFetch = createObsidianImageFetch(requestUrl);
         this.weChatImageWorkflow = new WeChatImageWorkflow(
             this.app,
             this.aiService,
@@ -125,7 +128,7 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.statusBarService,
             new ImageTaskPreviewService(this.app),
             this.settings.images,
-            value => new OpenAICompatibleImageProvider(value, imageFetch)
+            value => new OpenAICompatibleImageProvider(value, obsidianFetch)
         );
 
         // Context menu
@@ -284,6 +287,15 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
         this.weChatImageWorkflow.updateSettings(this.settings.images);
         this.publishingService?.updateSettings(this.settings.publishing);
+        this.refreshWorkbenchViews();
+    }
+
+    private refreshWorkbenchViews(): void {
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+            if (leaf.view instanceof WorkbenchView) {
+                leaf.view.refreshPublishingControls();
+            }
+        }
     }
 
     /**
@@ -1074,6 +1086,15 @@ class WorkbenchView extends ItemView {
         // Update history
         if (this.historyListEl) {
             this.renderHistory(this.historyListEl);
+        }
+        this.renderPublishingControls();
+    }
+
+    refreshPublishingControls(): void {
+        for (const platform of this.plugin.settings.publishing.defaultPlatforms) {
+            if (this.plugin.isPublishingPlatformConfigured(platform)) {
+                this.selectedPlatforms.add(platform);
+            }
         }
         this.renderPublishingControls();
     }

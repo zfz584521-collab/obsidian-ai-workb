@@ -11,6 +11,7 @@ import {
 } from './types';
 import { validatePlatformConfiguration } from './validation';
 import { FetchLike, WebhookClient } from './webhook';
+import { renderWeChatArticleHtml } from './wechat-renderer';
 
 const PLATFORM_NAMES: Record<PublishingPlatform, string> = {
     wechat: '微信公众号',
@@ -172,7 +173,7 @@ export class WeChatOfficialAdapter implements PlatformAdapter {
                     title: request.content.title,
                     author: request.settings.official.author || '',
                     digest: request.content.summary || '',
-                    content: markdownToHtml(request.content.bodyMarkdown, imageUrls),
+                    content: renderWeChatArticleHtml(request.content.bodyMarkdown, imageUrls),
                     content_source_url: typeof request.settings.defaults.contentSourceUrl === 'string'
                         ? request.settings.defaults.contentSourceUrl
                         : '',
@@ -462,75 +463,6 @@ export class YouTubeOfficialAdapter implements PlatformAdapter {
             };
         }
     }
-}
-
-function markdownToHtml(markdown: string, imageUrls: Map<string, string>): string {
-    let value = markdown;
-    for (const [path, url] of imageUrls) {
-        const escapedPath = escapeRegExp(path);
-        value = value
-            .replace(new RegExp(`!\\[\\[${escapedPath}(?:\\|[^\\]]*)?\\]\\]`, 'g'), `<img src="${escapeHtml(url)}">`)
-            .replace(new RegExp(`!\\[[^\\]]*\\]\\(<?${escapedPath}>?(?:\\s+["'][^"']*["'])?\\)`, 'g'), `<img src="${escapeHtml(url)}">`);
-    }
-
-    const lines = value.split(/\r?\n/);
-    const output: string[] = [];
-    let list: 'ul' | 'ol' | null = null;
-    const closeList = () => {
-        if (list) output.push(`</${list}>`);
-        list = null;
-    };
-
-    for (const line of lines) {
-        const heading = line.match(/^(#{1,6})\s+(.+)$/);
-        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
-        const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
-        if (heading) {
-            closeList();
-            const level = heading[1].length;
-            output.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-        } else if (unordered || ordered) {
-            const nextList = unordered ? 'ul' : 'ol';
-            if (list !== nextList) {
-                closeList();
-                list = nextList;
-                output.push(`<${list}>`);
-            }
-            output.push(`<li>${inlineMarkdown((unordered || ordered)![1])}</li>`);
-        } else if (!line.trim()) {
-            closeList();
-        } else if (/^<img\s/.test(line.trim())) {
-            closeList();
-            output.push(line.trim());
-        } else {
-            closeList();
-            output.push(`<p>${inlineMarkdown(line)}</p>`);
-        }
-    }
-    closeList();
-    return output.join('');
-}
-
-function inlineMarkdown(value: string): string {
-    return escapeHtml(value)
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>')
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/__([^_]+)__/g, '<strong>$1</strong>')
-        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-        .replace(/_([^_]+)_/g, '<em>$1</em>');
-}
-
-function escapeHtml(value: string): string {
-    return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function readJson(response: Response): Promise<any | null> {

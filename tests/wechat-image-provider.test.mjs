@@ -151,6 +151,6 @@ test('production wiring uses the Obsidian CORS-free request transport', async ()
     assert.match(mainSource, /createObsidianImageFetch\(requestUrl\)/);
     assert.match(
         mainSource,
-        /new OpenAICompatibleImageProvider\(value,\s*imageFetch\)/
+        /new OpenAICompatibleImageProvider\(value,\s*obsidianFetch\)/
     );
 });

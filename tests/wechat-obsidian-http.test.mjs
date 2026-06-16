@@ -45,3 +45,34 @@ test('adapts Obsidian requestUrl to the image provider fetch contract', async ()
     assert.deepEqual(await response.json(), { data: [{ b64_json: 'abc' }] });
     assert.equal(response.headers.get('content-type'), 'application/json');
 });
+
+test('adapts FormData bodies to multipart requestUrl uploads', async () => {
+    const { createObsidianImageFetch } = await importTypeScript(entry);
+    let captured;
+    const imageFetch = createObsidianImageFetch(async request => {
+        captured = request;
+        return {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+            arrayBuffer: new ArrayBuffer(0),
+            json: { media_id: 'media-id' },
+            text: '{"media_id":"media-id"}'
+        };
+    });
+
+    const form = new FormData();
+    form.append('media', new Blob(['image-bytes'], { type: 'image/png' }), 'cover.png');
+
+    await imageFetch('https://api.weixin.qq.com/cgi-bin/material/add_material', {
+        method: 'POST',
+        body: form
+    });
+
+    assert.equal(captured.method, 'POST');
+    assert.match(captured.headers['content-type'], /^multipart\/form-data; boundary=/);
+    assert.ok(captured.body instanceof ArrayBuffer);
+    const body = new TextDecoder().decode(captured.body);
+    assert.match(body, /name="media"; filename="cover\.png"/);
+    assert.match(body, /Content-Type: image\/png/);
+    assert.match(body, /image-bytes/);
+});

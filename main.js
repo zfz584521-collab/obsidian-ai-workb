@@ -4831,17 +4831,73 @@ function normalizeHeaders(headers) {
   });
   return normalized;
 }
+async function normalizeBody(body, headers) {
+  if (body === void 0 || body === null)
+    return void 0;
+  if (typeof body === "string" || body instanceof ArrayBuffer)
+    return body;
+  if (body instanceof FormData) {
+    const { contentType, buffer } = await encodeMultipartBody(body);
+    headers["content-type"] = contentType;
+    return buffer;
+  }
+  if (body instanceof Blob)
+    return body.arrayBuffer();
+  throw new Error("Unsupported request body format");
+}
+async function encodeMultipartBody(form) {
+  const boundary = `----ai-workbench-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  const chunks = [];
+  const encoder = new TextEncoder();
+  const pushText = (value) => chunks.push(encoder.encode(value));
+  for (const [name, value] of form.entries()) {
+    pushText(`--${boundary}\r
+`);
+    if (value instanceof Blob) {
+      const filename = value instanceof File ? value.name : "blob";
+      pushText(
+        `Content-Disposition: form-data; name="${escapeMultipartValue(name)}"; filename="${escapeMultipartValue(filename)}"\r
+Content-Type: ${value.type || "application/octet-stream"}\r
+\r
+`
+      );
+      chunks.push(new Uint8Array(await value.arrayBuffer()));
+      pushText("\r\n");
+    } else {
+      pushText(
+        `Content-Disposition: form-data; name="${escapeMultipartValue(name)}"\r
+\r
+${value}\r
+`
+      );
+    }
+  }
+  pushText(`--${boundary}--\r
+`);
+  const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return {
+    contentType: `multipart/form-data; boundary=${boundary}`,
+    buffer: bytes.buffer
+  };
+}
+function escapeMultipartValue(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r|\n/g, " ");
+}
 function createObsidianImageFetch(requestUrl2) {
   return async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-    const body = init == null ? void 0 : init.body;
-    if (body !== void 0 && typeof body !== "string" && !(body instanceof ArrayBuffer)) {
-      throw new Error("\u56FE\u7247\u8BF7\u6C42\u6B63\u6587\u683C\u5F0F\u4E0D\u53D7\u652F\u6301");
-    }
+    const requestHeaders = normalizeHeaders(init == null ? void 0 : init.headers);
+    const body = await normalizeBody(init == null ? void 0 : init.body, requestHeaders);
     const responsePromise = requestUrl2({
       url,
       method: init == null ? void 0 : init.method,
-      headers: normalizeHeaders(init == null ? void 0 : init.headers),
+      headers: requestHeaders,
       body,
       throw: false
     });
@@ -5433,6 +5489,206 @@ function hasLocalMedia(content) {
   return ((_a = content.cover) == null ? void 0 : _a.source) === "vault" || ((_b = content.video) == null ? void 0 : _b.source) === "vault" || content.images.some((image) => image.source === "vault");
 }
 
+// src/publishing/wechat-renderer.ts
+var PARAGRAPH_STYLE = [
+  "margin: 0 0 18px",
+  "line-height: 1.9",
+  "font-size: 16px",
+  "letter-spacing: 0",
+  "color: #2b2f36",
+  "text-align: left"
+].join("; ");
+var SECTION_STYLE = [
+  "margin: 30px 0 16px",
+  "padding: 10px 12px",
+  "background: #f5f8ff",
+  "border-left: 4px solid #2f80ed",
+  "border-radius: 4px"
+].join("; ");
+var SECTION_INDEX_STYLE = [
+  "display: inline-block",
+  "margin-right: 8px",
+  "font-size: 13px",
+  "font-weight: 700",
+  "color: #2f80ed"
+].join("; ");
+var SECTION_TEXT_STYLE = [
+  "font-size: 17px",
+  "font-weight: 700",
+  "line-height: 1.6",
+  "color: #1f2937"
+].join("; ");
+var IMAGE_SECTION_STYLE = [
+  "margin: 22px 0 18px",
+  "text-align: center"
+].join("; ");
+var IMAGE_STYLE = [
+  "max-width: 100%",
+  "height: auto",
+  "display: block",
+  "margin: 0 auto"
+].join("; ");
+var CAPTION_STYLE = [
+  "margin: 8px 0 18px",
+  "line-height: 1.7",
+  "font-size: 14px",
+  "color: #6b7280",
+  "text-align: center",
+  "font-style: italic"
+].join("; ");
+var LIST_STYLE = [
+  "margin: 0 0 18px",
+  "padding-left: 22px",
+  "line-height: 1.9",
+  "font-size: 16px",
+  "color: #2b2f36"
+].join("; ");
+var MAX_PARAGRAPH_CHARS = 96;
+function renderWeChatArticleHtml(markdown, imageUrls) {
+  const blocks = tokenizeBlocks(replaceImageReferences(markdown, imageUrls));
+  const output = [];
+  let sectionIndex = 0;
+  for (let index = 0; index < blocks.length; index++) {
+    const block = blocks[index];
+    if (block.type === "heading") {
+      sectionIndex += 1;
+      output.push(renderSectionHeading(block.text, sectionIndex));
+    } else if (block.type === "paragraph") {
+      for (const paragraph of splitParagraph(block.text)) {
+        output.push(`<p style="${PARAGRAPH_STYLE}">${inlineMarkdown(paragraph)}</p>`);
+      }
+    } else if (block.type === "list") {
+      const tag = block.ordered ? "ol" : "ul";
+      output.push(`<${tag} style="${LIST_STYLE}">`);
+      for (const item of block.items) {
+        output.push(`<li style="margin: 0 0 8px;">${inlineMarkdown(item)}</li>`);
+      }
+      output.push(`</${tag}>`);
+    } else if (block.type === "image") {
+      output.push(renderImage(block.html));
+      const next = blocks[index + 1];
+      if ((next == null ? void 0 : next.type) === "caption") {
+        output.push(`<p data-caption="true" style="${CAPTION_STYLE}">${inlineMarkdown(next.text)}</p>`);
+        index += 1;
+      }
+    } else if (block.type === "caption") {
+      output.push(`<p data-caption="true" style="${CAPTION_STYLE}">${inlineMarkdown(block.text)}</p>`);
+    }
+  }
+  return output.join("");
+}
+function tokenizeBlocks(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      const text = paragraph.join(" ").trim();
+      const caption = text.match(/^\*([^*]+)\*$/);
+      const boldHeading = text.match(/^\*\*([^*]+)\*\*$/) || text.match(/^__([^_]+)__$/);
+      if (caption) {
+        blocks.push({ type: "caption", text: caption[1] });
+      } else if (boldHeading && boldHeading[1].trim().length <= 36) {
+        blocks.push({ type: "heading", text: boldHeading[1].trim() });
+      } else {
+        blocks.push({ type: "paragraph", text });
+      }
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list)
+      blocks.push({ type: "list", ordered: list.ordered, items: list.items });
+    list = null;
+  };
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    const unordered = trimmed.match(/^[-*+]\s+(.+)$/);
+    const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+    } else if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", text: heading[2] });
+    } else if (/^<img\s/.test(trimmed)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "image", html: trimmed });
+    } else if (unordered || ordered) {
+      flushParagraph();
+      const isOrdered = Boolean(ordered);
+      if (!list || list.ordered !== isOrdered) {
+        flushList();
+        list = { ordered: isOrdered, items: [] };
+      }
+      list.items.push((unordered || ordered)[1]);
+    } else {
+      flushList();
+      paragraph.push(trimmed);
+    }
+  }
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+function replaceImageReferences(markdown, imageUrls) {
+  let value = markdown;
+  for (const [path, url] of imageUrls) {
+    const escapedPath = escapeRegExp(path);
+    value = value.replace(new RegExp(`!\\[\\[${escapedPath}(?:\\|[^\\]]*)?\\]\\]`, "g"), `<img src="${escapeHtml(url)}">`).replace(new RegExp(`!\\[[^\\]]*\\]\\(<?${escapedPath}>?(?:\\s+["'][^"']*["'])?\\)`, "g"), `<img src="${escapeHtml(url)}">`);
+  }
+  return value;
+}
+function splitParagraph(value) {
+  if (value.length <= MAX_PARAGRAPH_CHARS)
+    return [value];
+  const sentences = value.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [value];
+  const result = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const next = current ? `${current}${sentence}` : sentence;
+    if (next.length > MAX_PARAGRAPH_CHARS && current) {
+      result.push(current);
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+  if (current)
+    result.push(current);
+  return result.flatMap(splitOversizedChunk);
+}
+function splitOversizedChunk(value) {
+  if (value.length <= MAX_PARAGRAPH_CHARS)
+    return [value];
+  const chunks = [];
+  for (let offset = 0; offset < value.length; offset += MAX_PARAGRAPH_CHARS) {
+    chunks.push(value.slice(offset, offset + MAX_PARAGRAPH_CHARS));
+  }
+  return chunks;
+}
+function renderSectionHeading(text, index) {
+  return `<section data-section-index="${index}" style="${SECTION_STYLE}"><span style="${SECTION_INDEX_STYLE}">${String(index).padStart(2, "0")}</span><span style="${SECTION_TEXT_STYLE}">${inlineMarkdown(text)}</span></section>`;
+}
+function renderImage(html) {
+  var _a;
+  const source = ((_a = html.match(/\ssrc="([^"]+)"/)) == null ? void 0 : _a[1]) || "";
+  return `<section data-image-block="true" style="${IMAGE_SECTION_STYLE}"><img src="${source}" style="${IMAGE_STYLE}"></section>`;
+}
+function inlineMarkdown(value) {
+  return escapeHtml(value).replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>').replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/__([^_]+)__/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/_([^_]+)_/g, "<em>$1</em>");
+}
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // src/publishing/adapters.ts
 var PLATFORM_NAMES2 = {
   wechat: "\u5FAE\u4FE1\u516C\u4F17\u53F7",
@@ -5579,7 +5835,7 @@ var WeChatOfficialAdapter = class {
           title: request.content.title,
           author: request.settings.official.author || "",
           digest: request.content.summary || "",
-          content: markdownToHtml(request.content.bodyMarkdown, imageUrls),
+          content: renderWeChatArticleHtml(request.content.bodyMarkdown, imageUrls),
           content_source_url: typeof request.settings.defaults.contentSourceUrl === "string" ? request.settings.defaults.contentSourceUrl : "",
           thumb_media_id: coverResult.mediaId,
           need_open_comment: request.settings.defaults.openComments ? 1 : 0,
@@ -5845,58 +6101,6 @@ var YouTubeOfficialAdapter = class {
     }
   }
 };
-function markdownToHtml(markdown, imageUrls) {
-  let value = markdown;
-  for (const [path, url] of imageUrls) {
-    const escapedPath = escapeRegExp(path);
-    value = value.replace(new RegExp(`!\\[\\[${escapedPath}(?:\\|[^\\]]*)?\\]\\]`, "g"), `<img src="${escapeHtml(url)}">`).replace(new RegExp(`!\\[[^\\]]*\\]\\(<?${escapedPath}>?(?:\\s+["'][^"']*["'])?\\)`, "g"), `<img src="${escapeHtml(url)}">`);
-  }
-  const lines = value.split(/\r?\n/);
-  const output = [];
-  let list = null;
-  const closeList = () => {
-    if (list)
-      output.push(`</${list}>`);
-    list = null;
-  };
-  for (const line of lines) {
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
-    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (heading) {
-      closeList();
-      const level = heading[1].length;
-      output.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
-    } else if (unordered || ordered) {
-      const nextList = unordered ? "ul" : "ol";
-      if (list !== nextList) {
-        closeList();
-        list = nextList;
-        output.push(`<${list}>`);
-      }
-      output.push(`<li>${inlineMarkdown((unordered || ordered)[1])}</li>`);
-    } else if (!line.trim()) {
-      closeList();
-    } else if (/^<img\s/.test(line.trim())) {
-      closeList();
-      output.push(line.trim());
-    } else {
-      closeList();
-      output.push(`<p>${inlineMarkdown(line)}</p>`);
-    }
-  }
-  closeList();
-  return output.join("");
-}
-function inlineMarkdown(value) {
-  return escapeHtml(value).replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>').replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/__([^_]+)__/g, "<strong>$1</strong>").replace(/\*([^*]+)\*/g, "<em>$1</em>").replace(/_([^_]+)_/g, "<em>$1</em>");
-}
-function escapeHtml(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 async function readJson2(response) {
   try {
     return await response.json();
@@ -6233,10 +6437,10 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
     this.renderActions();
   }
   renderBaseEditor(container) {
-    new import_obsidian13.Setting(container).setName(t("publishing.title")).addText((text) => text.setValue(this.state.base.title).onChange((value) => this.state.base.title = value));
-    new import_obsidian13.Setting(container).setName(t("publishing.body")).addTextArea((text) => text.setValue(this.state.base.bodyMarkdown).onChange((value) => this.state.base.bodyMarkdown = value));
-    new import_obsidian13.Setting(container).setName(t("publishing.summary")).addTextArea((text) => text.setValue(this.state.base.summary || "").onChange((value) => this.state.base.summary = value));
-    new import_obsidian13.Setting(container).setName(t("publishing.tags")).setDesc(t("publishing.tagsDesc")).addText((text) => text.setValue(this.state.base.tags.join(", ")).onChange((value) => this.state.base.tags = parseTags(value)));
+    new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--title").setName(t("publishing.title")).addText((text) => text.setValue(this.state.base.title).onChange((value) => this.state.base.title = value));
+    new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--long").setClass("ai-workbench-publish-setting--body").setName(t("publishing.body")).addTextArea((text) => text.setValue(this.state.base.bodyMarkdown).onChange((value) => this.state.base.bodyMarkdown = value));
+    new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--long").setClass("ai-workbench-publish-setting--summary").setName(t("publishing.summary")).addTextArea((text) => text.setValue(this.state.base.summary || "").onChange((value) => this.state.base.summary = value));
+    new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--tags").setName(t("publishing.tags")).setDesc(t("publishing.tagsDesc")).addText((text) => text.setValue(this.state.base.tags.join(", ")).onChange((value) => this.state.base.tags = parseTags(value)));
   }
   renderPlatformEditor(container) {
     const tabs = container.createDiv({ cls: "ai-workbench-publish-tabs" });
@@ -6261,7 +6465,7 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
     const platform = this.activePlatform;
     const enabled = this.state.hasOverride(platform, field);
     const resolved = this.state.resolve(platform);
-    const setting = new import_obsidian13.Setting(container).setName(label).setDesc(enabled ? t("publishing.overridden") : t("publishing.inherited")).addToggle((toggle) => toggle.setValue(enabled).onChange((value) => {
+    const setting = new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass(textarea ? "ai-workbench-publish-setting--long" : "ai-workbench-publish-setting--compact").setName(label).setDesc(enabled ? t("publishing.overridden") : t("publishing.inherited")).addToggle((toggle) => toggle.setValue(enabled).onChange((value) => {
       if (value) {
         this.state.setOverride(platform, field, resolved[field] || "");
       } else {
@@ -6269,6 +6473,12 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
       }
       this.render();
     }));
+    if (field === "bodyMarkdown") {
+      setting.setClass("ai-workbench-publish-setting--body");
+    }
+    if (field === "summary") {
+      setting.setClass("ai-workbench-publish-setting--summary");
+    }
     if (textarea) {
       setting.addTextArea((text) => {
         text.setValue(String(resolved[field] || "")).setDisabled(!enabled).onChange((value) => this.state.setOverride(platform, field, value));
@@ -6619,9 +6829,13 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.statisticsService = new StatisticsService(this.app, this);
     this.helpService = new HelpService(this.app);
     this.contentExtractor = new ObsidianContentExtractor(this.app);
+    const obsidianFetch = createObsidianImageFetch(import_obsidian14.requestUrl);
     this.publishingService = new PublishingService(
       this.settings.publishing,
-      new PublishingAdapterFactory(new WebhookClient()),
+      new PublishingAdapterFactory(
+        new WebhookClient(obsidianFetch),
+        obsidianFetch
+      ),
       async (entries) => {
         this.publishingHistory = entries;
         await this.saveData({
@@ -6639,7 +6853,6 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       this.fileService,
       this.settings
     );
-    const imageFetch = createObsidianImageFetch(import_obsidian14.requestUrl);
     this.weChatImageWorkflow = new WeChatImageWorkflow(
       this.app,
       this.aiService,
@@ -6647,7 +6860,7 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       this.statusBarService,
       new ImageTaskPreviewService(this.app),
       this.settings.images,
-      (value) => new OpenAICompatibleImageProvider(value, imageFetch)
+      (value) => new OpenAICompatibleImageProvider(value, obsidianFetch)
     );
     this.contextMenuService = new ContextMenuService(
       this.app,
@@ -6766,6 +6979,14 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
     this.weChatImageWorkflow.updateSettings(this.settings.images);
     (_a = this.publishingService) == null ? void 0 : _a.updateSettings(this.settings.publishing);
+    this.refreshWorkbenchViews();
+  }
+  refreshWorkbenchViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof WorkbenchView) {
+        leaf.view.refreshPublishingControls();
+      }
+    }
   }
   /**
    * Get services
@@ -7440,6 +7661,14 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
     }
     if (this.historyListEl) {
       this.renderHistory(this.historyListEl);
+    }
+    this.renderPublishingControls();
+  }
+  refreshPublishingControls() {
+    for (const platform of this.plugin.settings.publishing.defaultPlatforms) {
+      if (this.plugin.isPublishingPlatformConfigured(platform)) {
+        this.selectedPlatforms.add(platform);
+      }
     }
     this.renderPublishingControls();
   }

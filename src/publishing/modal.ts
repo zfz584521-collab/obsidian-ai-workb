@@ -122,30 +122,40 @@ export class PublishEditorModal extends Modal {
         this.renderActions();
     }
 
-    private renderBaseEditor(container: HTMLElement): void {
-        new Setting(container)
-            .setName(t('publishing.title'))
-            .addText(text => text
-                .setValue(this.state.base.title)
-                .onChange(value => this.state.base.title = value));
+	private renderBaseEditor(container: HTMLElement): void {
+		new Setting(container)
+			.setClass('ai-workbench-publish-setting')
+			.setClass('ai-workbench-publish-setting--title')
+			.setName(t('publishing.title'))
+			.addText(text => text
+				.setValue(this.state.base.title)
+				.onChange(value => this.state.base.title = value));
 
-        new Setting(container)
-            .setName(t('publishing.body'))
-            .addTextArea(text => text
-                .setValue(this.state.base.bodyMarkdown)
-                .onChange(value => this.state.base.bodyMarkdown = value));
+		new Setting(container)
+			.setClass('ai-workbench-publish-setting')
+			.setClass('ai-workbench-publish-setting--long')
+			.setClass('ai-workbench-publish-setting--body')
+			.setName(t('publishing.body'))
+			.addTextArea(text => text
+				.setValue(this.state.base.bodyMarkdown)
+				.onChange(value => this.state.base.bodyMarkdown = value));
 
-        new Setting(container)
-            .setName(t('publishing.summary'))
-            .addTextArea(text => text
-                .setValue(this.state.base.summary || '')
-                .onChange(value => this.state.base.summary = value));
+		new Setting(container)
+			.setClass('ai-workbench-publish-setting')
+			.setClass('ai-workbench-publish-setting--long')
+			.setClass('ai-workbench-publish-setting--summary')
+			.setName(t('publishing.summary'))
+			.addTextArea(text => text
+				.setValue(this.state.base.summary || '')
+				.onChange(value => this.state.base.summary = value));
 
-        new Setting(container)
-            .setName(t('publishing.tags'))
-            .setDesc(t('publishing.tagsDesc'))
-            .addText(text => text
-                .setValue(this.state.base.tags.join(', '))
+		new Setting(container)
+			.setClass('ai-workbench-publish-setting')
+			.setClass('ai-workbench-publish-setting--tags')
+			.setName(t('publishing.tags'))
+			.setDesc(t('publishing.tagsDesc'))
+			.addText(text => text
+				.setValue(this.state.base.tags.join(', '))
                 .onChange(value => this.state.base.tags = parseTags(value)));
     }
 
@@ -177,24 +187,32 @@ export class PublishEditorModal extends Modal {
         textarea: boolean
     ): void {
         const platform = this.activePlatform;
-        const enabled = this.state.hasOverride(platform, field);
-        const resolved = this.state.resolve(platform);
-        const setting = new Setting(container)
-            .setName(label)
-            .setDesc(enabled ? t('publishing.overridden') : t('publishing.inherited'))
-            .addToggle(toggle => toggle
-                .setValue(enabled)
+		const enabled = this.state.hasOverride(platform, field);
+		const resolved = this.state.resolve(platform);
+		const setting = new Setting(container)
+			.setClass('ai-workbench-publish-setting')
+			.setClass(textarea ? 'ai-workbench-publish-setting--long' : 'ai-workbench-publish-setting--compact')
+			.setName(label)
+			.setDesc(enabled ? t('publishing.overridden') : t('publishing.inherited'))
+			.addToggle(toggle => toggle
+				.setValue(enabled)
                 .onChange(value => {
                     if (value) {
                         this.state.setOverride(platform, field, resolved[field] || '');
                     } else {
                         this.state.clearOverride(platform, field);
                     }
-                    this.render();
-                }));
+					this.render();
+				}));
+		if (field === 'bodyMarkdown') {
+			setting.setClass('ai-workbench-publish-setting--body');
+		}
+		if (field === 'summary') {
+			setting.setClass('ai-workbench-publish-setting--summary');
+		}
 
-        if (textarea) {
-            setting.addTextArea(text => {
+		if (textarea) {
+			setting.addTextArea(text => {
                 text.setValue(String(resolved[field] || ''))
                     .setDisabled(!enabled)
                     .onChange(value => this.state.setOverride(platform, field, value));
