@@ -368,6 +368,17 @@
     width: 100%;
 }
 
+.ai-workbench-publish-title-picker .setting-item-control {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.9fr) minmax(220px, 1.1fr);
+    gap: 8px;
+}
+
+.ai-workbench-publish-title-picker select,
+.ai-workbench-publish-title-picker input {
+    min-width: 0;
+}
+
 .ai-workbench-publish-setting--long {
     align-items: stretch;
     flex-direction: column;
@@ -475,6 +486,10 @@
     .ai-workbench-publish-layout {
         grid-template-columns: 1fr;
         max-height: none;
+    }
+
+    .ai-workbench-publish-title-picker .setting-item-control {
+        grid-template-columns: 1fr;
     }
 }
 

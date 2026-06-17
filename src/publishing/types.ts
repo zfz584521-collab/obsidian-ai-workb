@@ -47,6 +47,7 @@ export interface PublishMedia {
 export interface PublishContent {
     sourcePath: string;
     title: string;
+    titleOptions?: string[];
     bodyMarkdown: string;
     summary?: string;
     cover?: PublishMedia;

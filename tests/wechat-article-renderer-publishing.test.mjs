@@ -63,3 +63,25 @@ test('renders uploaded images with centered layout and italic captions', async (
     assert.match(html, /data-caption="true"/);
     assert.match(html, /一张对比图/);
 });
+test('keeps WeChat article readability features together', async () => {
+    const { renderWeChatArticleHtml } = await importTypeScript(entry);
+    const html = renderWeChatArticleHtml([
+        '**Short bold section**',
+        '',
+        'This paragraph is intentionally long enough to confirm that readable paragraph spacing remains active while the renderer also keeps image centering and captions in the same article output.',
+        '',
+        '![[image-02.png]]',
+        '',
+        '*Image caption line*'
+    ].join('\n'), new Map([['image-02.png', 'https://mmbiz.qpic.cn/image-02.png']]));
+
+    assert.match(html, /data-section-index="1"/);
+    assert.match(html, /01/);
+    assert.match(html, /background:\s*#f5f8ff/);
+    assert.match(html, /border-left:\s*4px solid #2f80ed/);
+    assert.match(html, /margin:\s*0 0 18px/);
+    assert.match(html, /data-image-block="true"/);
+    assert.match(html, /text-align:\s*center/);
+    assert.match(html, /data-caption="true"/);
+    assert.match(html, /Image caption line/);
+});

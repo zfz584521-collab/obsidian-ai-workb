@@ -4850,7 +4850,9 @@ async function encodeMultipartBody(form) {
   const chunks = [];
   const encoder = new TextEncoder();
   const pushText = (value) => chunks.push(encoder.encode(value));
-  for (const [name, value] of form.entries()) {
+  const entries = [];
+  form.forEach((value, name) => entries.push([name, value]));
+  for (const [name, value] of entries) {
     pushText(`--${boundary}\r
 `);
     if (value instanceof Blob) {
@@ -4939,12 +4941,53 @@ function stripFrontmatter(markdown) {
   return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 }
 function extractTitle(markdown, basename, frontmatterTitle) {
+  return extractTitleOptions(markdown, basename, frontmatterTitle)[0] || basename;
+}
+function extractTitleOptions(markdown, basename, frontmatterTitle) {
   var _a, _b;
+  const options = [];
   const configuredTitle = frontmatterTitle == null ? void 0 : frontmatterTitle.trim();
   if (configuredTitle)
-    return configuredTitle;
-  const heading = (_b = (_a = stripFrontmatter(markdown).match(/^#\s+(.+?)\s*$/m)) == null ? void 0 : _a[1]) == null ? void 0 : _b.trim();
-  return heading || basename;
+    options.push(configuredTitle);
+  const body = stripFrontmatter(markdown);
+  const planningText = textBeforeBodyMarker(body);
+  const titleSection = planningText.split(/\r?\n/);
+  let inTitleArea = false;
+  for (const line of titleSection) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (inTitleArea)
+        continue;
+      continue;
+    }
+    if (isTitleOptionsMarker(trimmed)) {
+      inTitleArea = true;
+      continue;
+    }
+    const labeled = trimmed.match(/^(?:#{1,6}\s*)?(?:标题|题目|选题|标题\s*\d+|标题[一二三四五六七八九十]+)\s*[:：]\s*(.+)$/);
+    if (labeled) {
+      options.push(cleanTitleCandidate(labeled[1]));
+      inTitleArea = true;
+      continue;
+    }
+    const listed = trimmed.match(/^(?:[-*+]\s+|\d+[.、]\s*|[一二三四五六七八九十]+[、.]\s*)(.+)$/);
+    if (listed && inTitleArea) {
+      options.push(cleanTitleCandidate(listed[1]));
+    }
+  }
+  const heading = (_b = (_a = body.match(/^#\s+(.+?)\s*$/m)) == null ? void 0 : _a[1]) == null ? void 0 : _b.trim();
+  if (heading)
+    options.push(cleanTitleCandidate(heading));
+  if (options.length === 0)
+    options.push(basename);
+  return dedupe(options.map(cleanTitleCandidate).filter(Boolean));
+}
+function preparePublishBody(markdown) {
+  const body = stripFrontmatter(markdown).trim();
+  const lines = body.split(/\r?\n/);
+  const markerIndex = lines.findIndex((line) => isBodyMarker(line.trim()));
+  const contentLines = markerIndex === -1 ? lines : lines.slice(markerIndex + 1);
+  return contentLines.filter((line) => !isStructuralMarker(line.trim())).join("\n").trim();
 }
 function findMediaReferences(markdown) {
   var _a, _b;
@@ -5027,6 +5070,35 @@ function getExtension(path) {
   const match = cleanPath.match(/\.([a-z0-9]+)$/i);
   return ((_a = match == null ? void 0 : match[1]) == null ? void 0 : _a.toLowerCase()) || "";
 }
+function textBeforeBodyMarker(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  const markerIndex = lines.findIndex((line) => isBodyMarker(line.trim()));
+  return (markerIndex === -1 ? lines : lines.slice(0, markerIndex)).join("\n");
+}
+function isBodyMarker(value) {
+  return /^(?:#{1,6}\s*)?(?:【\s*(?:正文|开头)\s*】|(?:正文|开头)|-{2,}\s*正文\s*-{2,}|━+\s*正文\s*━+)\s*$/.test(value);
+}
+function isTitleOptionsMarker(value) {
+  const normalized = value.replace(/^#{1,6}\s*/, "").replace(/^[\s\-—–━─]+/, "").replace(/[\s\-—–━─]+$/, "").trim();
+  return /^(?:标题|题目|选题|标题选项|候选标题|标题候选|标题方案)\s*[:：]?$/.test(normalized);
+}
+function isStructuralMarker(value) {
+  return /^【\s*(?:开头|结尾|正文)\s*】$/.test(value);
+}
+function cleanTitleCandidate(value) {
+  return value.replace(/^["'“”‘’《「『【\s]+/, "").replace(/["'“”‘’》」』】\s]+$/, "").replace(/^标题\s*[:：]\s*/, "").trim();
+}
+function dedupe(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const result = [];
+  for (const value of values) {
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
 function mediaIdentity(media) {
   if (!media)
     return void 0;
@@ -5068,10 +5140,12 @@ var ObsidianContentExtractor = class {
     const media = findMediaReferences(markdown).map((reference) => this.resolveMedia(reference, file)).filter((item) => item !== null);
     const images = media.filter((item) => item.kind === "image");
     const video = media.find((item) => item.kind === "video");
+    const titleOptions = extractTitleOptions(markdown, file.basename, stringValue(frontmatter == null ? void 0 : frontmatter.title));
     return {
       sourcePath: file.path,
       title: extractTitle(markdown, file.basename, stringValue(frontmatter == null ? void 0 : frontmatter.title)),
-      bodyMarkdown: stripFrontmatter(markdown).trim(),
+      titleOptions,
+      bodyMarkdown: preparePublishBody(markdown),
       summary: stringValue(frontmatter == null ? void 0 : frontmatter.summary) || stringValue(frontmatter == null ? void 0 : frontmatter.description),
       cover: images[0],
       images,
@@ -6437,7 +6511,26 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
     this.renderActions();
   }
   renderBaseEditor(container) {
-    new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--title").setName(t("publishing.title")).addText((text) => text.setValue(this.state.base.title).onChange((value) => this.state.base.title = value));
+    const titleOptions = this.state.base.titleOptions || [];
+    const selectedTitleIndex = titleOptions.indexOf(this.state.base.title);
+    const titleSetting = new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--title").setClass("ai-workbench-publish-title-picker").setName(t("publishing.title"));
+    if (titleOptions.length > 0) {
+      titleSetting.addDropdown((dropdown) => {
+        titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
+        dropdown.addOption("custom", "\u81EA\u5B9A\u4E49");
+        dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : "custom");
+        dropdown.onChange((value) => {
+          if (value === "custom")
+            return;
+          this.state.base.title = titleOptions[Number(value)] || this.state.base.title;
+          this.render();
+        });
+      });
+    }
+    titleSetting.addText((text) => {
+      text.inputEl.addClass("ai-workbench-custom-title");
+      text.setValue(this.state.base.title).onChange((value) => this.state.base.title = value);
+    });
     new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--long").setClass("ai-workbench-publish-setting--body").setName(t("publishing.body")).addTextArea((text) => text.setValue(this.state.base.bodyMarkdown).onChange((value) => this.state.base.bodyMarkdown = value));
     new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--long").setClass("ai-workbench-publish-setting--summary").setName(t("publishing.summary")).addTextArea((text) => text.setValue(this.state.base.summary || "").onChange((value) => this.state.base.summary = value));
     new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--tags").setName(t("publishing.tags")).setDesc(t("publishing.tagsDesc")).addText((text) => text.setValue(this.state.base.tags.join(", ")).onChange((value) => this.state.base.tags = parseTags(value)));
@@ -6761,6 +6854,7 @@ var VaultMediaPicker = class extends import_obsidian13.FuzzySuggestModal {
 function cloneContent(content) {
   return {
     ...content,
+    titleOptions: content.titleOptions ? [...content.titleOptions] : void 0,
     cover: content.cover ? { ...content.cover } : void 0,
     images: content.images.map((image) => ({ ...image })),
     video: content.video ? { ...content.video } : void 0,

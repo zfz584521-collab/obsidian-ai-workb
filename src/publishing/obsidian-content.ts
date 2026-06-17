@@ -1,5 +1,5 @@
 import { App, TFile } from 'obsidian';
-import { extractTitle, findMediaReferences, stripFrontmatter } from './content';
+import { extractTitle, extractTitleOptions, findMediaReferences, preparePublishBody } from './content';
 import { PublishContent, PublishMedia } from './types';
 
 const MIME_TYPES: Record<string, string> = {
@@ -31,10 +31,13 @@ export class ObsidianContentExtractor {
         const images = media.filter(item => item.kind === 'image');
         const video = media.find(item => item.kind === 'video');
 
+        const titleOptions = extractTitleOptions(markdown, file.basename, stringValue(frontmatter?.title));
+
         return {
             sourcePath: file.path,
             title: extractTitle(markdown, file.basename, stringValue(frontmatter?.title)),
-            bodyMarkdown: stripFrontmatter(markdown).trim(),
+            titleOptions,
+            bodyMarkdown: preparePublishBody(markdown),
             summary: stringValue(frontmatter?.summary) || stringValue(frontmatter?.description),
             cover: images[0],
             images,

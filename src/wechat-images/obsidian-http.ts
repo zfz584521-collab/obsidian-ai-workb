@@ -50,7 +50,10 @@ async function encodeMultipartBody(form: FormData): Promise<{
     const encoder = new TextEncoder();
     const pushText = (value: string) => chunks.push(encoder.encode(value));
 
-    for (const [name, value] of form.entries()) {
+    const entries: Array<[string, FormDataEntryValue]> = [];
+    form.forEach((value, name) => entries.push([name, value]));
+
+    for (const [name, value] of entries) {
         pushText(`--${boundary}\r\n`);
         if (value instanceof Blob) {
             const filename = value instanceof File ? value.name : 'blob';

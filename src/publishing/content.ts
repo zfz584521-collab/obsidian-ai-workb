@@ -22,11 +22,63 @@ export function extractTitle(
     basename: string,
     frontmatterTitle?: string
 ): string {
-    const configuredTitle = frontmatterTitle?.trim();
-    if (configuredTitle) return configuredTitle;
+    return extractTitleOptions(markdown, basename, frontmatterTitle)[0] || basename;
+}
 
-    const heading = stripFrontmatter(markdown).match(/^#\s+(.+?)\s*$/m)?.[1]?.trim();
-    return heading || basename;
+export function extractTitleOptions(
+    markdown: string,
+    basename: string,
+    frontmatterTitle?: string
+): string[] {
+    const options: string[] = [];
+    const configuredTitle = frontmatterTitle?.trim();
+    if (configuredTitle) options.push(configuredTitle);
+
+    const body = stripFrontmatter(markdown);
+    const planningText = textBeforeBodyMarker(body);
+
+    const titleSection = planningText.split(/\r?\n/);
+    let inTitleArea = false;
+    for (const line of titleSection) {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            if (inTitleArea) continue;
+            continue;
+        }
+        if (isTitleOptionsMarker(trimmed)) {
+            inTitleArea = true;
+            continue;
+        }
+
+        const labeled = trimmed.match(/^(?:#{1,6}\s*)?(?:标题|题目|选题|标题\s*\d+|标题[一二三四五六七八九十]+)\s*[:：]\s*(.+)$/);
+        if (labeled) {
+            options.push(cleanTitleCandidate(labeled[1]));
+            inTitleArea = true;
+            continue;
+        }
+
+        const listed = trimmed.match(/^(?:[-*+]\s+|\d+[.、]\s*|[一二三四五六七八九十]+[、.]\s*)(.+)$/);
+        if (listed && inTitleArea) {
+            options.push(cleanTitleCandidate(listed[1]));
+        }
+    }
+
+    const heading = body.match(/^#\s+(.+?)\s*$/m)?.[1]?.trim();
+    if (heading) options.push(cleanTitleCandidate(heading));
+
+    if (options.length === 0) options.push(basename);
+    return dedupe(options.map(cleanTitleCandidate).filter(Boolean));
+}
+
+export function preparePublishBody(markdown: string): string {
+    const body = stripFrontmatter(markdown).trim();
+    const lines = body.split(/\r?\n/);
+    const markerIndex = lines.findIndex(line => isBodyMarker(line.trim()));
+    const contentLines = markerIndex === -1 ? lines : lines.slice(markerIndex + 1);
+    return contentLines
+        .filter(line => !isStructuralMarker(line.trim()))
+        .join('\n')
+        .trim();
 }
 
 export function findMediaReferences(markdown: string): MediaReference[] {
@@ -123,6 +175,48 @@ function getExtension(path: string): string {
     const cleanPath = path.split(/[?#]/, 1)[0];
     const match = cleanPath.match(/\.([a-z0-9]+)$/i);
     return match?.[1]?.toLowerCase() || '';
+}
+
+function textBeforeBodyMarker(markdown: string): string {
+    const lines = markdown.split(/\r?\n/);
+    const markerIndex = lines.findIndex(line => isBodyMarker(line.trim()));
+    return (markerIndex === -1 ? lines : lines.slice(0, markerIndex)).join('\n');
+}
+
+function isBodyMarker(value: string): boolean {
+    return /^(?:#{1,6}\s*)?(?:【\s*(?:正文|开头)\s*】|(?:正文|开头)|-{2,}\s*正文\s*-{2,}|━+\s*正文\s*━+)\s*$/.test(value);
+}
+
+function isTitleOptionsMarker(value: string): boolean {
+    const normalized = value
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^[\s\-—–━─]+/, '')
+        .replace(/[\s\-—–━─]+$/, '')
+        .trim();
+    return /^(?:标题|题目|选题|标题选项|候选标题|标题候选|标题方案)\s*[:：]?$/.test(normalized);
+}
+
+function isStructuralMarker(value: string): boolean {
+    return /^【\s*(?:开头|结尾|正文)\s*】$/.test(value);
+}
+
+function cleanTitleCandidate(value: string): string {
+    return value
+        .replace(/^["'“”‘’《「『【\s]+/, '')
+        .replace(/["'“”‘’》」』】\s]+$/, '')
+        .replace(/^标题\s*[:：]\s*/, '')
+        .trim();
+}
+
+function dedupe(values: string[]): string[] {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values) {
+        if (seen.has(value)) continue;
+        seen.add(value);
+        result.push(value);
+    }
+    return result;
 }
 
 function mediaIdentity(media: PublishContent['cover']): object | undefined {

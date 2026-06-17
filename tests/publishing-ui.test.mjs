@@ -69,6 +69,13 @@ test('publish modal gives long text fields enough editing space', () => {
     assert.match(styles, /\.ai-workbench-publish-setting--long[\s\S]*flex-direction:\s*column/);
 });
 
+test('publish modal lets users choose article title candidates or customize title', () => {
+    assert.match(modalSource, /titleOptions/);
+    assert.match(modalSource, /addDropdown/);
+    assert.match(modalSource, /ai-workbench-publish-title-picker/);
+    assert.match(modalSource, /ai-workbench-custom-title/);
+});
+
 test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /ai-workbench-publishing/);
     // Check for i18n keys instead of hardcoded platform names

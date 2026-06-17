@@ -123,13 +123,31 @@ export class PublishEditorModal extends Modal {
     }
 
 	private renderBaseEditor(container: HTMLElement): void {
-		new Setting(container)
+        const titleOptions = this.state.base.titleOptions || [];
+        const selectedTitleIndex = titleOptions.indexOf(this.state.base.title);
+		const titleSetting = new Setting(container)
 			.setClass('ai-workbench-publish-setting')
 			.setClass('ai-workbench-publish-setting--title')
-			.setName(t('publishing.title'))
-			.addText(text => text
+            .setClass('ai-workbench-publish-title-picker')
+			.setName(t('publishing.title'));
+        if (titleOptions.length > 0) {
+            titleSetting.addDropdown(dropdown => {
+                titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
+                dropdown.addOption('custom', '自定义');
+                dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : 'custom');
+                dropdown.onChange(value => {
+                    if (value === 'custom') return;
+                    this.state.base.title = titleOptions[Number(value)] || this.state.base.title;
+                    this.render();
+                });
+            });
+        }
+        titleSetting.addText(text => {
+            text.inputEl.addClass('ai-workbench-custom-title');
+            text
 				.setValue(this.state.base.title)
-				.onChange(value => this.state.base.title = value));
+				.onChange(value => this.state.base.title = value);
+        });
 
 		new Setting(container)
 			.setClass('ai-workbench-publish-setting')
@@ -536,6 +554,7 @@ class VaultMediaPicker extends FuzzySuggestModal<TFile> {
 function cloneContent(content: PublishContent): PublishContent {
     return {
         ...content,
+        titleOptions: content.titleOptions ? [...content.titleOptions] : undefined,
         cover: content.cover ? { ...content.cover } : undefined,
         images: content.images.map(image => ({ ...image })),
         video: content.video ? { ...content.video } : undefined,
