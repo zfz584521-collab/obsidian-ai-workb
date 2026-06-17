@@ -76,6 +76,13 @@ test('publish modal lets users choose article title candidates or customize titl
     assert.match(modalSource, /ai-workbench-custom-title/);
 });
 
+test('platform title overrides can choose title candidates or customize title', () => {
+    assert.match(modalSource, /renderTitleOptionDropdown/);
+    assert.match(modalSource, /ai-workbench-platform-title-picker/);
+    assert.match(modalSource, /titleOptions\.forEach/);
+    assert.match(modalSource, /dropdown\.addOption\('custom'/);
+});
+
 test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /ai-workbench-publishing/);
     // Check for i18n keys instead of hardcoded platform names
@@ -99,4 +106,27 @@ test('official publishing uses the Obsidian request transport', () => {
     assert.match(mainSource, /const obsidianFetch = createObsidianImageFetch\(requestUrl\)/);
     assert.match(mainSource, /new WebhookClient\(obsidianFetch\)/);
     assert.match(mainSource, /new PublishingAdapterFactory\(\s*new WebhookClient\(obsidianFetch\),\s*obsidianFetch\s*\)/s);
+});
+
+test('Xiaohongshu formatting exposes custom rules and two-step automation', () => {
+    assert.match(settingsSource, /xiaohongshuFormatting/);
+    assert.match(settingsSource, /formattingRules/);
+    assert.match(mainSource, /formatXiaohongshuDraft/);
+    assert.match(mainSource, /formatAndPublishXiaohongshuDraft/);
+    assert.match(mainSource, /buildXiaohongshuFormattingPrompt/);
+    assert.match(mainSource, /parseXiaohongshuFormattedDraft/);
+});
+
+test('Xiaohongshu automation lives in configurable custom prompts', async () => {
+    const typesSource = await readFile(new URL('../src/types/index.ts', import.meta.url), 'utf8');
+    const customPromptsSource = await readFile(new URL('../src/services/custom-prompts.ts', import.meta.url), 'utf8');
+
+    assert.match(typesSource, /DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS/);
+    assert.match(typesSource, /automationAction\?: 'xiaohongshu-format' \| 'xiaohongshu-format-publish'/);
+    assert.match(typesSource, /enabled\?: boolean/);
+    assert.match(mainSource, /withDefaultAutomationPrompts/);
+    assert.match(mainSource, /prompt\.automationAction === 'xiaohongshu-format'/);
+    assert.match(mainSource, /prompt\.automationAction === 'xiaohongshu-format-publish'/);
+    assert.match(customPromptsSource, /getEnabled\(\)/);
+    assert.match(settingsSource, /setName\('启用 Prompt'\)/);
 });

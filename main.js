@@ -44,6 +44,20 @@ var DEFAULT_IMAGE_SETTINGS = {
   keepOriginalPrompts: false
 };
 
+// src/video-generation/types.ts
+var DEFAULT_VIDEO_SETTINGS = {
+  provider: "openai-compatible",
+  endpoint: "https://api.openai.com/v1",
+  apiKey: "",
+  model: "video-model",
+  size: "1080x1920",
+  duration: 5,
+  timeout: 600,
+  retryCount: 1,
+  pollInterval: 5,
+  maxPollAttempts: 120
+};
+
 // src/publishing/types.ts
 var PUBLISHING_PLATFORMS = [
   "wechat",
@@ -102,7 +116,150 @@ function mergePublishingSettings(saved) {
   };
 }
 
+// src/xiaohongshu/formatting.ts
+var DEFAULT_XIAOHONGSHU_FORMATTING_RULES = `\u5438\u775B\u6807\u9898
+
+\u5F00\u5934\u94A9\u5B50\uFF1A\u75DB\u70B9 / \u573A\u666F / \u53CD\u5DEE / \u4E00\u53E5\u8BDD\u94A9\u5B50
+
+\u2728 \u6838\u5FC3\u70B9 1
+\u77ED\u53E5\u3001\u53E3\u8BED\u5316\u3001\u624B\u673A\u7AEF\u597D\u8BFB
+
+\u{1F4CC} \u6838\u5FC3\u70B9 2
+\u628A\u6B65\u9AA4\u3001\u7ECF\u9A8C\u3001\u7ED3\u8BBA\u89C6\u89C9\u5316
+
+\u2705 \u6838\u5FC3\u70B9 3
+\u7A81\u51FA\u6536\u85CF\u4EF7\u503C
+
+\u7ED3\u5C3E\u4E92\u52A8\uFF1A
+\u6536\u85CF / \u8BC4\u8BBA / \u5173\u6CE8\u5F15\u5BFC
+
+#\u76F8\u5173\u6807\u7B7E #\u5C0F\u7EA2\u4E66\u6807\u7B7E #\u5782\u76F4\u9886\u57DF\u6807\u7B7E`;
+function buildXiaohongshuFormattingPrompt(customRules) {
+  const rules = (customRules == null ? void 0 : customRules.trim()) || DEFAULT_XIAOHONGSHU_FORMATTING_RULES;
+  return `\u8BF7\u628A\u4EE5\u4E0B\u6587\u6848\u6539\u5199\u5E76\u6392\u7248\u6210\u9002\u5408\u5C0F\u7EA2\u4E66\u53D1\u5E03\u7684\u8349\u7A3F\u3002
+
+\u6392\u7248\u89C4\u5219\uFF1A
+${rules}
+
+\u8F93\u51FA\u8981\u6C42\uFF1A
+1. \u53EA\u8FD4\u56DE\u6392\u7248\u540E\u7684\u6587\u6848\uFF0C\u4E0D\u8981\u89E3\u91CA\u4F60\u7684\u5904\u7406\u8FC7\u7A0B\u3002
+2. \u5F00\u5934\u5FC5\u987B\u4FDD\u7559 5 \u4E2A\u6807\u9898\u5019\u9009\uFF0C\u683C\u5F0F\u4E3A\uFF1A
+\u6807\u9898\u9009\u9879\uFF1A
+1. \u6807\u9898\u4E00
+2. \u6807\u9898\u4E8C
+3. \u6807\u9898\u4E09
+4. \u6807\u9898\u56DB
+5. \u6807\u9898\u4E94
+3. \u6807\u9898\u6BCF\u4E2A\u4E0D\u8D85\u8FC7 20 \u4E2A\u4E2D\u6587\u5B57\u7B26\uFF0C\u9ED8\u8BA4\u4F7F\u7528\u7B2C 1 \u4E2A\u4F5C\u4E3A\u53D1\u5E03\u6807\u9898\u3002
+4. \u6807\u9898\u9009\u9879\u4E4B\u540E\u8F93\u51FA\u201C\u6B63\u6587\uFF1A\u201D\uFF0C\u518D\u8F93\u51FA\u6392\u7248\u540E\u7684\u6B63\u6587\u3002
+5. \u6B63\u6587\u9002\u5408\u624B\u673A\u9605\u8BFB\uFF0C\u6BB5\u843D\u77ED\u3001\u7559\u767D\u6E05\u695A\u3001\u91CD\u70B9\u89C6\u89C9\u5316\u3002
+6. \u4FDD\u7559\u539F\u6587\u4E8B\u5B9E\uFF0C\u4E0D\u8981\u7F16\u9020\u5177\u4F53\u6570\u636E\u3001\u6848\u4F8B\u6216\u627F\u8BFA\u3002
+7. \u672B\u5C3E\u4FDD\u7559 5-12 \u4E2A\u76F8\u5173\u8BDD\u9898\u6807\u7B7E\u3002`;
+}
+function parseXiaohongshuFormattedDraft(markdown) {
+  const normalized = markdown.trim();
+  const lines = normalized.split(/\r?\n/);
+  const titleOptions = extractTitleOptions(lines).slice(0, 5);
+  const bodyStart = findBodyStart(lines);
+  let bodyLines = bodyStart >= 0 ? lines.slice(bodyStart + 1) : stripTitleOptionBlock(lines);
+  const fallbackTitleIndex = bodyLines.findIndex((line) => line.trim());
+  const fallbackTitle = fallbackTitleIndex >= 0 ? cleanTitle(bodyLines[fallbackTitleIndex]) : "";
+  const title = (titleOptions[0] || fallbackTitle || "\u5C0F\u7EA2\u4E66\u8349\u7A3F").slice(0, 64);
+  if (bodyLines.length > 0 && cleanTitle(bodyLines[0]) === title) {
+    bodyLines = bodyLines.slice(1);
+  }
+  const bodyMarkdown = bodyLines.join("\n").trim();
+  return {
+    title,
+    titleOptions: titleOptions.length > 0 ? titleOptions : [title],
+    bodyMarkdown,
+    tags: extractHashTags(normalized)
+  };
+}
+function extractTitleOptions(lines) {
+  const markerIndex = lines.findIndex((line) => /^标题(?:选项|候选)?\s*[:：]?\s*$/.test(line.trim()));
+  if (markerIndex === -1)
+    return [];
+  const result = [];
+  for (const line of lines.slice(markerIndex + 1)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (result.length > 0)
+        continue;
+      continue;
+    }
+    if (/^正文\s*[:：]?\s*$/.test(trimmed))
+      break;
+    const match = trimmed.match(/^(?:[-*+]\s+|\d+[.、]\s*)(.+)$/);
+    if (!match) {
+      if (result.length > 0)
+        break;
+      continue;
+    }
+    const title = cleanTitle(match[1]).slice(0, 64);
+    if (title)
+      result.push(title);
+  }
+  return result;
+}
+function findBodyStart(lines) {
+  return lines.findIndex((line) => /^正文\s*[:：]?\s*$/.test(line.trim()));
+}
+function stripTitleOptionBlock(lines) {
+  const markerIndex = lines.findIndex((line) => /^标题(?:选项|候选)?\s*[:：]?\s*$/.test(line.trim()));
+  if (markerIndex === -1)
+    return lines;
+  let end = markerIndex + 1;
+  while (end < lines.length) {
+    const trimmed = lines[end].trim();
+    if (/^正文\s*[:：]?\s*$/.test(trimmed))
+      return lines.slice(end + 1);
+    if (trimmed && !/^(?:[-*+]\s+|\d+[.、]\s*)/.test(trimmed))
+      break;
+    end++;
+  }
+  return lines.slice(end);
+}
+function cleanTitle(value) {
+  return value.replace(/^#{1,6}\s*/, "").replace(/^【标题】\s*/, "").replace(/^标题\s*[:：]\s*/, "").trim();
+}
+function extractHashTags(value) {
+  const tags = /* @__PURE__ */ new Set();
+  for (const match of value.matchAll(/#([^\s#，,。；;]+)/g)) {
+    const tag = match[1].trim();
+    if (tag)
+      tags.add(tag);
+  }
+  return [...tags];
+}
+
 // src/types/index.ts
+var DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS = [
+  {
+    id: "xiaohongshu-format",
+    name: "\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248",
+    description: "\u6309\u5C0F\u7EA2\u4E66\u98CE\u683C\u751F\u6210 5 \u4E2A\u6807\u9898\u5019\u9009\u3001\u6B63\u6587\u548C\u8BDD\u9898\u6807\u7B7E",
+    prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u8BBE\u7F6E\u91CC\u8C03\u6574\u6392\u7248\u89C4\u5219\u3002",
+    outputMode: "newFile",
+    category: "xiaohongshu",
+    enabled: true,
+    automationAction: "xiaohongshu-format",
+    createdAt: 0,
+    updatedAt: 0
+  },
+  {
+    id: "xiaohongshu-format-publish",
+    name: "\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F",
+    description: "\u5148\u81EA\u52A8\u6392\u7248\uFF0C\u518D\u4FDD\u5B58\u5230\u5C0F\u7EA2\u4E66\u8349\u7A3F\u7BB1",
+    prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u8BBE\u7F6E\u91CC\u8C03\u6574\u6392\u7248\u89C4\u5219\u3002",
+    outputMode: "newFile",
+    category: "xiaohongshu",
+    enabled: true,
+    automationAction: "xiaohongshu-format-publish",
+    createdAt: 0,
+    updatedAt: 0
+  }
+];
 var DEFAULT_SETTINGS = {
   api: {
     endpoint: "https://api.openai.com/v1",
@@ -112,6 +269,7 @@ var DEFAULT_SETTINGS = {
     headers: {}
   },
   images: { ...DEFAULT_IMAGE_SETTINGS },
+  videos: { ...DEFAULT_VIDEO_SETTINGS },
   output: {
     summaryPosition: "append",
     language: "auto",
@@ -127,7 +285,7 @@ var DEFAULT_SETTINGS = {
     showButton: true
   },
   customPrompts: {
-    prompts: []
+    prompts: DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS
   },
   shortcuts: {
     enabled: true,
@@ -148,6 +306,9 @@ var DEFAULT_SETTINGS = {
     showTokenCount: false
   },
   publishing: DEFAULT_PUBLISHING_SETTINGS,
+  xiaohongshuFormatting: {
+    rules: DEFAULT_XIAOHONGSHU_FORMATTING_RULES
+  },
   i18n: {
     language: "auto"
   }
@@ -650,6 +811,23 @@ var zhCN = {
     keepOriginalPrompts: "\u4FDD\u7559\u539F\u914D\u56FE\u63D0\u793A\u8BCD",
     keepOriginalPromptsDesc: "\u5173\u95ED\u65F6\uFF0C\u6210\u529F\u751F\u6210\u7684\u56FE\u7247\u4F1A\u66FF\u6362\u539F\u914D\u56FE\u533A\u5757",
     seconds: "\u79D2",
+    // Video Generation
+    videoGeneration: "\u77ED\u89C6\u9891\u751F\u6210",
+    videoProvider: "\u89C6\u9891\u63D0\u4F9B\u5546",
+    videoProviderDesc: "\u652F\u6301 OpenAI \u517C\u5BB9\u89C6\u9891 API \u548C Webhook \u7F51\u5173",
+    videoApiEndpoint: "\u89C6\u9891 API \u57FA\u7840\u5730\u5740",
+    videoApiEndpointDesc: "\u517C\u5BB9\u7F51\u5173\u4F1A\u81EA\u52A8\u8C03\u7528 /videos/generations",
+    videoApiKey: "\u89C6\u9891 API Key",
+    videoApiKeyDesc: "\u4EC5\u4FDD\u5B58\u5728\u672C\u5730\u63D2\u4EF6\u8BBE\u7F6E\u4E2D",
+    videoModel: "\u89C6\u9891\u6A21\u578B",
+    videoSize: "\u89C6\u9891\u5C3A\u5BF8",
+    videoSizeDesc: "\u7AD6\u5C4F\u77ED\u89C6\u9891\u9ED8\u8BA4 1080x1920",
+    videoDuration: "\u89C6\u9891\u65F6\u957F",
+    videoDurationDesc: "\u5355\u4F4D\uFF1A\u79D2",
+    videoTimeout: "\u89C6\u9891\u8BF7\u6C42\u8D85\u65F6",
+    videoTimeoutDesc: "\u5355\u4F4D\uFF1A\u79D2\uFF0C\u89C6\u9891\u751F\u6210\u53EF\u80FD\u9700\u8981\u6570\u5206\u949F",
+    pollInterval: "\u8F6E\u8BE2\u95F4\u9694",
+    maxPollAttempts: "\u6700\u5927\u8F6E\u8BE2\u6B21\u6570",
     // Output Settings
     outputSettings: "\u8F93\u51FA\u8BBE\u7F6E",
     summaryPosition: "\u603B\u7ED3\u4F4D\u7F6E",
@@ -965,6 +1143,23 @@ var en = {
     keepOriginalPrompts: "Keep Original Image Prompts",
     keepOriginalPromptsDesc: "When disabled, successfully generated images replace original image blocks",
     seconds: "seconds",
+    // Video Generation
+    videoGeneration: "Video Generation",
+    videoProvider: "Video Provider",
+    videoProviderDesc: "Supports OpenAI-compatible video APIs and webhook-compatible gateways",
+    videoApiEndpoint: "Video API Base URL",
+    videoApiEndpointDesc: "For compatible gateways, the plugin calls /videos/generations",
+    videoApiKey: "Video API Key",
+    videoApiKeyDesc: "Stored locally in plugin settings only",
+    videoModel: "Video Model",
+    videoSize: "Video Size",
+    videoSizeDesc: "Vertical short video default is 1080x1920",
+    videoDuration: "Video Duration",
+    videoDurationDesc: "In seconds",
+    videoTimeout: "Video Request Timeout",
+    videoTimeoutDesc: "In seconds. Video generation can take several minutes",
+    pollInterval: "Polling Interval",
+    maxPollAttempts: "Max Poll Attempts",
     // Output Settings
     outputSettings: "Output Settings",
     summaryPosition: "Summary Position",
@@ -1867,6 +2062,9 @@ var CustomPromptsService = class {
   getAll() {
     return this.settings.prompts || [];
   }
+  getEnabled() {
+    return this.getAll().filter((prompt) => prompt.enabled !== false);
+  }
   /**
    * Get a specific prompt by ID
    */
@@ -1938,7 +2136,10 @@ var CustomPromptsService = class {
           name: prompt.name,
           description: prompt.description || "",
           prompt: prompt.prompt,
-          outputMode: prompt.outputMode || "append"
+          outputMode: prompt.outputMode || "append",
+          category: prompt.category,
+          enabled: prompt.enabled !== false,
+          automationAction: prompt.automationAction
         });
         imported++;
       } catch (e) {
@@ -3797,6 +3998,53 @@ var WorkbenchSettingTab = class extends import_obsidian10.PluginSettingTab {
       this.plugin.settings.images.keepOriginalPrompts = value;
       await this.plugin.saveSettings();
     }));
+    containerEl.createEl("h2", { text: t("settings.videoGeneration") });
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoProvider")).setDesc(t("settings.videoProviderDesc")).addDropdown((dropdown) => dropdown.addOption("openai-compatible", "OpenAI \u517C\u5BB9 API").addOption("webhook", "Webhook").setValue(this.plugin.settings.videos.provider).onChange(async (value) => {
+      this.plugin.settings.videos.provider = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoApiEndpoint")).setDesc(t("settings.videoApiEndpointDesc")).addText((text) => text.setPlaceholder("https://api.example.com/v1").setValue(this.plugin.settings.videos.endpoint).onChange((0, import_obsidian10.debounce)(async (value) => {
+      if (value && !this.validateEndpoint(value)) {
+        new import_obsidian10.Notice(t("validation.httpsRequired"));
+        return;
+      }
+      this.plugin.settings.videos.endpoint = value;
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoApiKey")).setDesc(t("settings.videoApiKeyDesc")).addText((text) => text.setPlaceholder("sk-...").setValue(this.maskApiKey(this.plugin.settings.videos.apiKey)).onChange((0, import_obsidian10.debounce)(async (value) => {
+      if (value.includes("..."))
+        return;
+      this.plugin.settings.videos.apiKey = value;
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoModel")).addText((text) => text.setPlaceholder("video-model").setValue(this.plugin.settings.videos.model).onChange((0, import_obsidian10.debounce)(async (value) => {
+      this.plugin.settings.videos.model = value.trim();
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoSize")).setDesc(t("settings.videoSizeDesc")).addText((text) => text.setPlaceholder("1080x1920").setValue(this.plugin.settings.videos.size).onChange((0, import_obsidian10.debounce)(async (value) => {
+      this.plugin.settings.videos.size = value.trim();
+      await this.plugin.saveSettings();
+    }, SETTINGS_DEBOUNCE_MS)));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoDuration")).setDesc(t("settings.videoDurationDesc")).addSlider((slider) => slider.setLimits(1, 60, 1).setValue(this.plugin.settings.videos.duration).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.videos.duration = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.videoTimeout")).setDesc(t("settings.videoTimeoutDesc")).addSlider((slider) => slider.setLimits(60, 1800, 60).setValue(this.plugin.settings.videos.timeout).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.videos.timeout = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.retryCount")).addSlider((slider) => slider.setLimits(0, 5, 1).setValue(this.plugin.settings.videos.retryCount).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.videos.retryCount = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.pollInterval")).addSlider((slider) => slider.setLimits(1, 30, 1).setValue(this.plugin.settings.videos.pollInterval).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.videos.pollInterval = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian10.Setting(containerEl).setName(t("settings.maxPollAttempts")).addSlider((slider) => slider.setLimits(1, 240, 1).setValue(this.plugin.settings.videos.maxPollAttempts).setDynamicTooltip().onChange(async (value) => {
+      this.plugin.settings.videos.maxPollAttempts = value;
+      await this.plugin.saveSettings();
+    }));
     containerEl.createEl("h2", { text: t("settings.outputSettings") });
     new import_obsidian10.Setting(containerEl).setName(t("settings.summaryPosition")).setDesc(t("settings.summaryPositionDesc")).addDropdown((dropdown) => dropdown.addOption("append", t("settings.summaryPositionAppend")).addOption("prepend", t("settings.summaryPositionPrepend")).addOption("newFile", t("settings.summaryPositionNewFile")).setValue(this.plugin.settings.output.summaryPosition).onChange(async (value) => {
       this.plugin.settings.output.summaryPosition = value;
@@ -3810,6 +4058,16 @@ var WorkbenchSettingTab = class extends import_obsidian10.PluginSettingTab {
       this.plugin.settings.output.includeTimestamp = value;
       await this.plugin.saveSettings();
     }));
+    containerEl.createEl("h2", { text: "\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248" });
+    const formattingRules = this.plugin.settings.xiaohongshuFormatting.rules;
+    new import_obsidian10.Setting(containerEl).setName("\u6392\u7248\u89C4\u5219").setDesc("\u7528\u4E8E\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u548C\u201C\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F\u201D\u7684\u81EA\u5B9A\u4E49\u89C4\u5219\u3002\u7559\u7A7A\u65F6\u4F1A\u6062\u590D\u9ED8\u8BA4\u89C4\u5219\u3002").addTextArea((text) => {
+      text.inputEl.rows = 12;
+      text.inputEl.addClass("ai-workbench-xiaohongshu-formatting-rules");
+      text.setPlaceholder(DEFAULT_XIAOHONGSHU_FORMATTING_RULES).setValue(formattingRules).onChange((0, import_obsidian10.debounce)(async (value) => {
+        this.plugin.settings.xiaohongshuFormatting.rules = value.trim() || DEFAULT_XIAOHONGSHU_FORMATTING_RULES;
+        await this.plugin.saveSettings();
+      }, SETTINGS_DEBOUNCE_MS));
+    });
     containerEl.createEl("h2", { text: t("settings.backupSettings") });
     new import_obsidian10.Setting(containerEl).setName(t("settings.enableBackup")).setDesc(t("settings.enableBackupDesc")).addToggle((toggle) => toggle.setValue(this.plugin.settings.backup.enabled).onChange(async (value) => {
       this.plugin.settings.backup.enabled = value;
@@ -3927,6 +4185,12 @@ var WorkbenchSettingTab = class extends import_obsidian10.PluginSettingTab {
         info.createEl("p", { text: prompt.description, cls: "prompt-desc" });
       }
       const actions = item.createDiv({ cls: "prompt-actions" });
+      new import_obsidian10.Setting(actions).setName(prompt.enabled === false ? "\u5DF2\u5173\u95ED" : "\u5DF2\u542F\u7528").addToggle((toggle) => toggle.setValue(prompt.enabled !== false).onChange(async (value) => {
+        this.plugin.getCustomPromptsService().update(prompt.id, { enabled: value });
+        await this.plugin.saveSettings();
+        this.plugin.refreshCustomPromptCommands();
+        this.display();
+      }));
       actions.createEl("button", { text: t("common.edit") }, (btn) => {
         btn.addEventListener("click", () => {
           const modal = new CustomPromptModal(this.app, async (updated) => {
@@ -3937,14 +4201,16 @@ var WorkbenchSettingTab = class extends import_obsidian10.PluginSettingTab {
           modal.open();
         });
       });
-      actions.createEl("button", { text: t("common.delete"), cls: "mod-warning" }, (btn) => {
-        btn.addEventListener("click", async () => {
-          this.plugin.getCustomPromptsService().delete(prompt.id);
-          await this.plugin.saveSettings();
-          this.plugin.refreshCustomPromptCommands();
-          this.display();
+      if (!prompt.automationAction) {
+        actions.createEl("button", { text: t("common.delete"), cls: "mod-warning" }, (btn) => {
+          btn.addEventListener("click", async () => {
+            this.plugin.getCustomPromptsService().delete(prompt.id);
+            await this.plugin.saveSettings();
+            this.plugin.refreshCustomPromptCommands();
+            this.display();
+          });
         });
-      });
+      }
     }
   }
   renderShortcuts(container) {
@@ -4005,6 +4271,7 @@ var CustomPromptModal = class extends import_obsidian10.Modal {
     this.description = "";
     this.prompt = "";
     this.outputMode = "append";
+    this.enabled = true;
     this.onSave = onSave;
     this.existingPrompt = existingPrompt;
     if (existingPrompt) {
@@ -4012,6 +4279,7 @@ var CustomPromptModal = class extends import_obsidian10.Modal {
       this.description = existingPrompt.description;
       this.prompt = existingPrompt.prompt;
       this.outputMode = existingPrompt.outputMode;
+      this.enabled = existingPrompt.enabled !== false;
     }
   }
   onOpen() {
@@ -4021,8 +4289,10 @@ var CustomPromptModal = class extends import_obsidian10.Modal {
     new import_obsidian10.Setting(contentEl).setName(t("settings.promptName")).setDesc(t("settings.promptNameDesc")).addText((text) => text.setPlaceholder(t("settings.promptNameDesc")).setValue(this.name).onChange((value) => this.name = value));
     new import_obsidian10.Setting(contentEl).setName(t("settings.promptDescription")).setDesc(t("settings.promptDescriptionDesc")).addText((text) => text.setPlaceholder(t("common.optional")).setValue(this.description).onChange((value) => this.description = value));
     new import_obsidian10.Setting(contentEl).setName(t("settings.promptTemplate")).setDesc(t("settings.promptTemplateDesc")).addTextArea((text) => text.setPlaceholder("\u8BF7\u5E2E\u6211...").setValue(this.prompt).onChange((value) => this.prompt = value));
+    new import_obsidian10.Setting(contentEl).setName("\u542F\u7528 Prompt").setDesc("\u5173\u95ED\u540E\u4E0D\u4F1A\u663E\u793A\u5728\u4FA7\u8FB9\u680F\u3001\u53F3\u952E\u83DC\u5355\u548C\u547D\u4EE4\u5165\u53E3\u4E2D").addToggle((toggle) => toggle.setValue(this.enabled).onChange((value) => this.enabled = value));
     new import_obsidian10.Setting(contentEl).setName(t("settings.outputMode")).addDropdown((dropdown) => dropdown.addOption("append", t("settings.outputModeAppend")).addOption("prepend", t("settings.outputModePrepend")).addOption("newFile", t("settings.outputModeNewFile")).addOption("replace", t("settings.outputModeReplace")).addOption("selection", t("settings.outputModeSelection")).setValue(this.outputMode).onChange((value) => this.outputMode = value));
     new import_obsidian10.Setting(contentEl).addButton((btn) => btn.setButtonText(t("common.cancel")).onClick(() => this.close())).addButton((btn) => btn.setButtonText(t("common.save")).setCta().onClick(() => {
+      var _a, _b;
       if (!this.name.trim()) {
         new import_obsidian10.Notice(t("validation.nameRequired"));
         return;
@@ -4035,7 +4305,10 @@ var CustomPromptModal = class extends import_obsidian10.Modal {
         name: this.name.trim(),
         description: this.description.trim(),
         prompt: this.prompt.trim(),
-        outputMode: this.outputMode
+        outputMode: this.outputMode,
+        enabled: this.enabled,
+        category: (_a = this.existingPrompt) == null ? void 0 : _a.category,
+        automationAction: (_b = this.existingPrompt) == null ? void 0 : _b.automationAction
       });
       this.close();
     }));
@@ -4067,6 +4340,7 @@ var ShortcutModal = class extends import_obsidian10.Modal {
       dropdown.addOption("mindmap", t("actions.mindmap"));
       dropdown.addOption("mermaid", t("actions.mermaid"));
       dropdown.addOption("wechat-insert-images", t("actions.wechatInsertImages"));
+      dropdown.addOption("generate-short-video", "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891");
       for (const prompt of this.customPrompts) {
         dropdown.addOption(`custom:${prompt.id}`, `${t("actions.custom")}: ${prompt.name}`);
       }
@@ -4931,6 +5205,359 @@ function createObsidianImageFetch(requestUrl2) {
   };
 }
 
+// src/video-generation/video-provider.ts
+var MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+var ALLOWED_MIME_TYPES2 = /* @__PURE__ */ new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime"
+]);
+var VideoProviderError = class extends Error {
+  constructor(message, retryable, status) {
+    super(message);
+    this.retryable = retryable;
+    this.status = status;
+    this.name = "VideoProviderError";
+  }
+};
+function validateUrl2(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch (e) {
+    throw new VideoProviderError("\u89C6\u9891 API \u5730\u5740\u683C\u5F0F\u65E0\u6548", false);
+  }
+  const localhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && localhost)) {
+    throw new VideoProviderError("\u89C6\u9891\u5730\u5740\u5FC5\u987B\u4F7F\u7528 HTTPS\uFF0C\u672C\u5730\u670D\u52A1\u9664\u5916", false);
+  }
+  return url;
+}
+function decodeBase642(value) {
+  try {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+  } catch (e) {
+    throw new VideoProviderError("\u89C6\u9891\u6570\u636E\u4E0D\u662F\u6709\u6548\u7684 base64", false);
+  }
+}
+function detectVideo(bytes) {
+  if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(4, 8)) === "ftyp") {
+    return { bytes, extension: "mp4", mimeType: "video/mp4" };
+  }
+  if (bytes.length >= 4 && bytes[0] === 26 && bytes[1] === 69 && bytes[2] === 223 && bytes[3] === 163) {
+    return { bytes, extension: "webm", mimeType: "video/webm" };
+  }
+  return void 0;
+}
+function extensionFromMime(mimeType2) {
+  if (mimeType2 === "video/webm")
+    return "webm";
+  if (mimeType2 === "video/quicktime")
+    return "mov";
+  return "mp4";
+}
+function normalizeVideo(bytes, declaredMime) {
+  if (bytes.length === 0 || bytes.length > MAX_VIDEO_BYTES) {
+    throw new VideoProviderError("\u89C6\u9891\u6570\u636E\u5927\u5C0F\u65E0\u6548", false);
+  }
+  if (declaredMime && !ALLOWED_MIME_TYPES2.has(declaredMime)) {
+    throw new VideoProviderError("\u89C6\u9891 MIME \u7C7B\u578B\u4E0D\u53D7\u652F\u6301", false);
+  }
+  const detected = detectVideo(bytes);
+  if (detected)
+    return detected;
+  if (declaredMime && ALLOWED_MIME_TYPES2.has(declaredMime)) {
+    return {
+      bytes,
+      extension: extensionFromMime(declaredMime),
+      mimeType: declaredMime
+    };
+  }
+  throw new VideoProviderError("\u89C6\u9891\u683C\u5F0F\u6821\u9A8C\u5931\u8D25", false);
+}
+function requestError2(status) {
+  const retryable = status === 429 || status >= 500;
+  const messages = {
+    400: "\u89C6\u9891\u751F\u6210\u8BF7\u6C42\u53C2\u6570\u65E0\u6548",
+    401: "\u89C6\u9891 API Key \u65E0\u6548\u6216\u5DF2\u8FC7\u671F",
+    403: "\u6CA1\u6709\u6743\u9650\u8C03\u7528\u89C6\u9891 API",
+    404: "\u89C6\u9891 API \u5730\u5740\u4E0D\u5B58\u5728",
+    429: "\u89C6\u9891\u751F\u6210\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41"
+  };
+  return new VideoProviderError(
+    messages[status] || (retryable ? "\u89C6\u9891\u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528" : `\u89C6\u9891\u8BF7\u6C42\u5931\u8D25: ${status}`),
+    retryable,
+    status
+  );
+}
+function extractResult(data) {
+  const item = Array.isArray(data == null ? void 0 : data.data) ? data.data[0] : void 0;
+  return {
+    b64: (item == null ? void 0 : item.b64_json) || (item == null ? void 0 : item.base64) || (data == null ? void 0 : data.b64_json) || (data == null ? void 0 : data.base64),
+    url: (item == null ? void 0 : item.url) || (item == null ? void 0 : item.video_url) || (data == null ? void 0 : data.url) || (data == null ? void 0 : data.video_url),
+    taskId: (data == null ? void 0 : data.id) || (data == null ? void 0 : data.task_id) || (data == null ? void 0 : data.taskId),
+    status: data == null ? void 0 : data.status
+  };
+}
+var OpenAICompatibleVideoProvider = class {
+  constructor(settings, fetchFn = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+    this.settings = settings;
+    this.fetchFn = fetchFn;
+    this.sleep = sleep;
+  }
+  async generate(request) {
+    const endpoint = validateUrl2(this.settings.endpoint);
+    const base = endpoint.toString().replace(/\/$/, "");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      this.settings.timeout * 1e3
+    );
+    try {
+      const response = await this.fetchFn(`${base}/videos/generations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${this.settings.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.settings.model,
+          prompt: request.prompt,
+          size: request.size,
+          duration: request.duration,
+          response_format: "b64_json"
+        }),
+        signal: controller.signal
+      });
+      if (!response.ok)
+        throw requestError2(response.status);
+      const data = await this.readJson(response);
+      return await this.resolveResult(base, data, controller.signal);
+    } catch (error) {
+      if (error instanceof VideoProviderError)
+        throw error;
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new VideoProviderError("\u89C6\u9891\u751F\u6210\u8BF7\u6C42\u8D85\u65F6", true);
+      }
+      throw new VideoProviderError("\u89C6\u9891\u670D\u52A1\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25", true);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  async resolveResult(base, data, signal) {
+    let result = extractResult(data);
+    if (typeof result.b64 === "string")
+      return normalizeVideo(decodeBase642(result.b64));
+    if (typeof result.url === "string")
+      return await this.downloadVideo(result.url, signal);
+    if (!result.taskId) {
+      throw new VideoProviderError("\u89C6\u9891 API \u8FD4\u56DE\u683C\u5F0F\u65E0\u6548", false);
+    }
+    const taskId = result.taskId;
+    for (let attempt = 0; attempt < this.settings.maxPollAttempts; attempt++) {
+      if (attempt > 0)
+        await this.sleep(this.settings.pollInterval * 1e3);
+      const response = await this.fetchFn(
+        `${base}/videos/generations/${encodeURIComponent(taskId)}`,
+        {
+          headers: { "Authorization": `Bearer ${this.settings.apiKey}` },
+          signal
+        }
+      );
+      if (!response.ok)
+        throw requestError2(response.status);
+      const task = await this.readJson(response);
+      result = extractResult(task);
+      if (typeof result.b64 === "string")
+        return normalizeVideo(decodeBase642(result.b64));
+      if (typeof result.url === "string")
+        return await this.downloadVideo(result.url, signal);
+      if (["failed", "error", "cancelled"].includes(String(result.status || "").toLowerCase())) {
+        throw new VideoProviderError("\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u5931\u8D25", false);
+      }
+    }
+    throw new VideoProviderError("\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u7B49\u5F85\u8D85\u65F6", true);
+  }
+  async readJson(response) {
+    try {
+      return await response.json();
+    } catch (e) {
+      throw new VideoProviderError("\u89C6\u9891 API \u8FD4\u56DE\u7684 JSON \u65E0\u6548", false);
+    }
+  }
+  async downloadVideo(urlValue, signal) {
+    var _a;
+    const url = validateUrl2(urlValue);
+    const response = await this.fetchFn(url.toString(), { signal });
+    if (!response.ok)
+      throw requestError2(response.status);
+    const mimeType2 = (_a = response.headers.get("content-type")) == null ? void 0 : _a.split(";", 1)[0].trim();
+    const buffer = await response.arrayBuffer();
+    return normalizeVideo(new Uint8Array(buffer), mimeType2);
+  }
+};
+
+// src/video-generation/workflow.ts
+function validateSettings2(settings) {
+  let url;
+  try {
+    url = new URL(settings.endpoint);
+  } catch (e) {
+    throw new Error("\u89C6\u9891 API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+  }
+  const localhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && localhost)) {
+    throw new Error("\u89C6\u9891 API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF0C\u672C\u5730\u670D\u52A1\u9664\u5916");
+  }
+  if (!settings.apiKey.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u89C6\u9891 API Key");
+  if (!settings.model.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u89C6\u9891\u6A21\u578B");
+  if (!settings.size.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u89C6\u9891\u5C3A\u5BF8");
+  if (settings.duration < 1 || settings.duration > 60) {
+    throw new Error("\u89C6\u9891\u65F6\u957F\u5FC5\u987B\u5728 1 \u5230 60 \u79D2\u4E4B\u95F4");
+  }
+}
+function exactArrayBuffer2(bytes) {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  );
+}
+function splitPath(path) {
+  const normalized = normalizePath4(path);
+  const slash = normalized.lastIndexOf("/");
+  const parent = slash >= 0 ? normalized.slice(0, slash) : "";
+  const filename = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+  return { parent, basename: filename.replace(/\.md$/i, "") };
+}
+function normalizePath4(path) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "");
+}
+function joinPath2(parent, child) {
+  return parent ? `${parent}/${child}` : child;
+}
+function relativeEmbedPath(filePath, assetPath) {
+  const { parent } = splitPath(filePath);
+  return parent && assetPath.startsWith(`${parent}/`) ? assetPath.slice(parent.length + 1) : assetPath;
+}
+async function resolveVideoPath(file, exists, extension = "mp4") {
+  const { parent, basename } = splitPath(file.path);
+  const assetDirPath = joinPath2(parent, `${basename}-assets`);
+  for (let counter = 1; counter <= 100; counter++) {
+    const videoPath = joinPath2(
+      assetDirPath,
+      `video-${String(counter).padStart(2, "0")}.${extension}`
+    );
+    if (!await exists(videoPath))
+      return { assetDirPath, videoPath };
+  }
+  throw new Error("\u65E0\u6CD5\u521B\u5EFA\u89C6\u9891\u6587\u4EF6\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A");
+}
+var AIShortVideoPromptBuilder = class {
+  constructor(textClient) {
+    this.textClient = textClient;
+  }
+  async build(source) {
+    var _a;
+    const prompt = [
+      "\u8BF7\u628A\u4E0B\u9762\u7684\u77ED\u89C6\u9891\u6587\u6848\u6216\u811A\u672C\u6539\u5199\u6210\u9002\u5408 AI \u89C6\u9891\u751F\u6210\u6A21\u578B\u7684\u4E2D\u6587\u63D0\u793A\u8BCD\u3002",
+      "\u8981\u6C42\uFF1A\u7AD6\u5C4F\u77ED\u89C6\u9891\uFF0C\u955C\u5934\u8BED\u8A00\u6E05\u6670\uFF0C\u5305\u542B\u4E3B\u4F53\u3001\u573A\u666F\u3001\u52A8\u4F5C\u3001\u5149\u7EBF\u3001\u98CE\u683C\u548C\u8282\u594F\u3002",
+      "\u5982\u679C\u539F\u6587\u5DF2\u7ECF\u662F\u5206\u955C\u811A\u672C\uFF0C\u8BF7\u4FDD\u7559\u5206\u955C\u7ED3\u6784\u5E76\u538B\u7F29\u6210\u53EF\u76F4\u63A5\u751F\u6210\u89C6\u9891\u7684\u63D0\u793A\u8BCD\u3002",
+      "\u53EA\u8FD4\u56DE\u63D0\u793A\u8BCD\uFF0C\u4E0D\u8981\u89E3\u91CA\u3002"
+    ].join("\n");
+    const response = await this.textClient.chat(prompt, source);
+    if (!response.success || !((_a = response.content) == null ? void 0 : _a.trim())) {
+      throw new Error(response.error || "\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25");
+    }
+    return response.content.trim();
+  }
+};
+var VideoGenerationWorkflow = class {
+  constructor(app, status, promptBuilder, settings, providerFactory = (value) => new OpenAICompatibleVideoProvider(value), markdownViewType) {
+    this.app = app;
+    this.status = status;
+    this.promptBuilder = promptBuilder;
+    this.settings = settings;
+    this.providerFactory = providerFactory;
+    this.markdownViewType = markdownViewType;
+    this.running = false;
+  }
+  updateSettings(settings) {
+    this.settings = { ...settings };
+  }
+  async run(file) {
+    var _a, _b;
+    if (this.running) {
+      return { success: false, error: "\u77ED\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
+    }
+    this.running = true;
+    try {
+      const target = file || this.app.workspace.getActiveFile();
+      if (!target || target.extension !== "md") {
+        throw new Error("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
+      }
+      validateSettings2(this.settings);
+      const markdown = await this.app.vault.read(target);
+      const selected = this.getSelection(target);
+      const source = (selected || markdown).trim();
+      if (!source)
+        throw new Error("\u77ED\u89C6\u9891\u6587\u6848\u6216\u811A\u672C\u4E3A\u7A7A");
+      this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
+      const prompt = await this.promptBuilder.build(source);
+      this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891", 0, 1);
+      const video = await this.providerFactory(this.settings).generate({
+        prompt,
+        size: this.settings.size,
+        duration: this.settings.duration
+      });
+      const output = await resolveVideoPath(
+        target,
+        (path) => this.app.vault.adapter.exists(path),
+        video.extension
+      );
+      if (!await this.app.vault.adapter.exists(output.assetDirPath)) {
+        await ((_b = (_a = this.app.vault).createFolder) == null ? void 0 : _b.call(_a, output.assetDirPath));
+      }
+      await this.app.vault.adapter.writeBinary(
+        output.videoPath,
+        exactArrayBuffer2(video.bytes)
+      );
+      const embedPath = relativeEmbedPath(target.path, output.videoPath);
+      const nextContent = `${markdown.trimEnd()}
+
+## AI \u751F\u6210\u77ED\u89C6\u9891
+
+![[${embedPath}]]
+`;
+      await this.app.vault.modify(target, nextContent);
+      this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891", 1, 1);
+      this.status.setCompleted();
+      return { success: true, outputPath: output.videoPath };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u77ED\u89C6\u9891\u751F\u6210\u5931\u8D25";
+      this.status.setError(message);
+      return { success: false, error: message };
+    } finally {
+      this.running = false;
+    }
+  }
+  getSelection(file) {
+    var _a, _b;
+    const view = this.app.workspace.getActiveViewOfType(this.markdownViewType);
+    if (((_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) !== file.path)
+      return void 0;
+    const selection = (_b = view.editor) == null ? void 0 : _b.getSelection();
+    return (selection == null ? void 0 : selection.trim()) || void 0;
+  }
+};
+
 // src/publishing/obsidian-content.ts
 var import_obsidian12 = require("obsidian");
 
@@ -4941,9 +5568,9 @@ function stripFrontmatter(markdown) {
   return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
 }
 function extractTitle(markdown, basename, frontmatterTitle) {
-  return extractTitleOptions(markdown, basename, frontmatterTitle)[0] || basename;
+  return extractTitleOptions2(markdown, basename, frontmatterTitle)[0] || basename;
 }
-function extractTitleOptions(markdown, basename, frontmatterTitle) {
+function extractTitleOptions2(markdown, basename, frontmatterTitle) {
   var _a, _b;
   const options = [];
   const configuredTitle = frontmatterTitle == null ? void 0 : frontmatterTitle.trim();
@@ -5140,7 +5767,7 @@ var ObsidianContentExtractor = class {
     const media = findMediaReferences(markdown).map((reference) => this.resolveMedia(reference, file)).filter((item) => item !== null);
     const images = media.filter((item) => item.kind === "image");
     const video = media.find((item) => item.kind === "video");
-    const titleOptions = extractTitleOptions(markdown, file.basename, stringValue(frontmatter == null ? void 0 : frontmatter.title));
+    const titleOptions = extractTitleOptions2(markdown, file.basename, stringValue(frontmatter == null ? void 0 : frontmatter.title));
     return {
       sourcePath: file.path,
       title: extractTitle(markdown, file.basename, stringValue(frontmatter == null ? void 0 : frontmatter.title)),
@@ -6512,21 +7139,17 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
   }
   renderBaseEditor(container) {
     const titleOptions = this.state.base.titleOptions || [];
-    const selectedTitleIndex = titleOptions.indexOf(this.state.base.title);
     const titleSetting = new import_obsidian13.Setting(container).setClass("ai-workbench-publish-setting").setClass("ai-workbench-publish-setting--title").setClass("ai-workbench-publish-title-picker").setName(t("publishing.title"));
-    if (titleOptions.length > 0) {
-      titleSetting.addDropdown((dropdown) => {
-        titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
-        dropdown.addOption("custom", "\u81EA\u5B9A\u4E49");
-        dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : "custom");
-        dropdown.onChange((value) => {
-          if (value === "custom")
-            return;
-          this.state.base.title = titleOptions[Number(value)] || this.state.base.title;
-          this.render();
-        });
-      });
-    }
+    this.renderTitleOptionDropdown(
+      titleSetting,
+      titleOptions,
+      this.state.base.title,
+      false,
+      (value) => {
+        this.state.base.title = value;
+        this.render();
+      }
+    );
     titleSetting.addText((text) => {
       text.inputEl.addClass("ai-workbench-custom-title");
       text.setValue(this.state.base.title).onChange((value) => this.state.base.title = value);
@@ -6577,8 +7200,35 @@ var PublishEditorModal = class extends import_obsidian13.Modal {
         text.setValue(String(resolved[field] || "")).setDisabled(!enabled).onChange((value) => this.state.setOverride(platform, field, value));
       });
     } else {
+      if (field === "title") {
+        setting.setClass("ai-workbench-platform-title-picker");
+        this.renderTitleOptionDropdown(
+          setting,
+          resolved.titleOptions || [],
+          String(resolved[field] || ""),
+          !enabled,
+          (value) => this.state.setOverride(platform, field, value)
+        );
+      }
       setting.addText((text) => text.setValue(String(resolved[field] || "")).setDisabled(!enabled).onChange((value) => this.state.setOverride(platform, field, value)));
     }
+  }
+  renderTitleOptionDropdown(setting, titleOptions, selectedTitle, disabled, onSelect) {
+    if (titleOptions.length === 0)
+      return;
+    const selectedTitleIndex = titleOptions.indexOf(selectedTitle);
+    setting.addDropdown((dropdown) => {
+      titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
+      dropdown.addOption("custom", "\u81EA\u5B9A\u4E49");
+      dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : "custom");
+      dropdown.setDisabled(disabled);
+      dropdown.onChange((value) => {
+        if (value === "custom")
+          return;
+        onSelect(titleOptions[Number(value)] || selectedTitle);
+        this.render();
+      });
+    });
   }
   renderOverrideTags(container) {
     const platform = this.activePlatform;
@@ -6956,13 +7606,21 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       this.settings.images,
       (value) => new OpenAICompatibleImageProvider(value, obsidianFetch)
     );
+    this.videoGenerationWorkflow = new VideoGenerationWorkflow(
+      this.app,
+      this.statusBarService,
+      new AIShortVideoPromptBuilder(this.aiService),
+      this.settings.videos,
+      (value) => new OpenAICompatibleVideoProvider(value, obsidianFetch),
+      import_obsidian14.MarkdownView
+    );
     this.contextMenuService = new ContextMenuService(
       this.app,
       this,
       this.settings.contextMenu,
       (action, isSelection) => this.executeAction(action, isSelection),
       (id) => this.executeCustomPrompt(id),
-      () => this.customPromptsService.getAll(),
+      () => this.customPromptsService.getEnabled(),
       (file) => this.executeWeChatImageInsertion(file)
     );
     this.registerView(VIEW_TYPE, (leaf) => new WorkbenchView(leaf, this));
@@ -6991,6 +7649,11 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       id: "wechat-insert-images",
       name: "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247",
       callback: () => this.executeWeChatImageInsertion()
+    });
+    this.addCommand({
+      id: "generate-short-video",
+      name: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891",
+      callback: () => this.executeShortVideoGeneration()
     });
     this.addCommand({
       id: "manage-backups",
@@ -7042,11 +7705,13 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     console.log("AI Workbench unloaded");
   }
   async loadSettings() {
+    var _a, _b;
     const saved = await this.loadData();
     this.publishingHistory = Array.isArray(saved == null ? void 0 : saved.publishingHistory) ? saved.publishingHistory.slice(0, 50) : [];
     this.settings = {
       api: { ...DEFAULT_SETTINGS.api, ...saved == null ? void 0 : saved.api },
       images: { ...DEFAULT_SETTINGS.images, ...saved == null ? void 0 : saved.images },
+      videos: { ...DEFAULT_SETTINGS.videos, ...saved == null ? void 0 : saved.videos },
       output: { ...DEFAULT_SETTINGS.output, ...saved == null ? void 0 : saved.output },
       backup: { ...DEFAULT_SETTINGS.backup, ...saved == null ? void 0 : saved.backup },
       claudian: { ...DEFAULT_SETTINGS.claudian, ...saved == null ? void 0 : saved.claudian },
@@ -7055,11 +7720,32 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       contextMenu: { ...DEFAULT_SETTINGS.contextMenu, ...saved == null ? void 0 : saved.contextMenu },
       ui: { ...DEFAULT_SETTINGS.ui, ...saved == null ? void 0 : saved.ui },
       publishing: mergePublishingSettings(saved == null ? void 0 : saved.publishing),
+      xiaohongshuFormatting: {
+        ...DEFAULT_SETTINGS.xiaohongshuFormatting,
+        ...saved == null ? void 0 : saved.xiaohongshuFormatting,
+        rules: ((_b = (_a = saved == null ? void 0 : saved.xiaohongshuFormatting) == null ? void 0 : _a.rules) == null ? void 0 : _b.trim()) || DEFAULT_XIAOHONGSHU_FORMATTING_RULES
+      },
       i18n: { ...DEFAULT_SETTINGS.i18n, ...saved == null ? void 0 : saved.i18n }
     };
+    this.settings.customPrompts.prompts = this.withDefaultAutomationPrompts(this.settings.customPrompts.prompts);
+  }
+  withDefaultAutomationPrompts(prompts = []) {
+    const merged = [...prompts];
+    for (const defaultPrompt of DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS) {
+      const exists = merged.some(
+        (prompt) => prompt.id === defaultPrompt.id || prompt.automationAction === defaultPrompt.automationAction
+      );
+      if (!exists) {
+        merged.push({ ...defaultPrompt });
+      }
+    }
+    return merged.map((prompt) => ({
+      ...prompt,
+      enabled: prompt.enabled !== false
+    }));
   }
   async saveSettings() {
-    var _a;
+    var _a, _b;
     await this.saveData({
       ...this.settings,
       publishingHistory: this.publishingHistory
@@ -7072,7 +7758,8 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.contextMenuService.updateSettings(this.settings.contextMenu);
     this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
     this.weChatImageWorkflow.updateSettings(this.settings.images);
-    (_a = this.publishingService) == null ? void 0 : _a.updateSettings(this.settings.publishing);
+    (_a = this.videoGenerationWorkflow) == null ? void 0 : _a.updateSettings(this.settings.videos);
+    (_b = this.publishingService) == null ? void 0 : _b.updateSettings(this.settings.publishing);
     this.refreshWorkbenchViews();
   }
   refreshWorkbenchViews() {
@@ -7131,6 +7818,100 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       (media) => this.contentExtractor.loadMedia(media)
     ).open();
   }
+  async formatXiaohongshuDraft() {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const file = this.app.workspace.getActiveFile();
+      if (!file || file.extension !== "md") {
+        new import_obsidian14.Notice("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
+        return;
+      }
+      const markdown = await this.app.vault.read(file);
+      const formatted = await this.createXiaohongshuFormattedText(markdown);
+      const newFile = await this.fileService.createNewFile(
+        file,
+        "xiaohongshu-formatted",
+        formatted
+      );
+      new import_obsidian14.Notice(`\u5C0F\u7EA2\u4E66\u6392\u7248\u5B8C\u6210: ${newFile.path}`);
+    } catch (error) {
+      new import_obsidian14.Notice(`\u5C0F\u7EA2\u4E66\u6392\u7248\u5931\u8D25: ${error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF"}`);
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async formatAndPublishXiaohongshuDraft() {
+    var _a;
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const file = this.app.workspace.getActiveFile();
+      if (!file || file.extension !== "md") {
+        new import_obsidian14.Notice("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
+        return;
+      }
+      if (!this.isPublishingPlatformConfigured("xiaohongshu")) {
+        new import_obsidian14.Notice("\u8BF7\u5148\u914D\u7F6E\u5C0F\u7EA2\u4E66\u53D1\u5E03\u5E73\u53F0");
+        this.openPublishingSettings();
+        return;
+      }
+      const markdown = await this.app.vault.read(file);
+      const formatted = await this.createXiaohongshuFormattedText(markdown);
+      const formattedDraft = parseXiaohongshuFormattedDraft(formatted);
+      const extracted = await this.contentExtractor.extract(file);
+      const publishContent = {
+        ...extracted,
+        title: formattedDraft.title,
+        titleOptions: formattedDraft.titleOptions,
+        bodyMarkdown: formattedDraft.bodyMarkdown,
+        tags: formattedDraft.tags.length > 0 ? formattedDraft.tags : extracted.tags
+      };
+      if (publishContent.cover) {
+        publishContent.cover = await this.contentExtractor.loadMedia(publishContent.cover);
+      }
+      publishContent.images = await Promise.all(
+        publishContent.images.map((media) => this.contentExtractor.loadMedia(media))
+      );
+      if (publishContent.video) {
+        publishContent.video = await this.contentExtractor.loadMedia(publishContent.video);
+      }
+      const result = await this.publishingService.publishAll({
+        content: publishContent,
+        overrides: {},
+        platforms: ["xiaohongshu"]
+      });
+      const xiaohongshuResult = result.results.xiaohongshu;
+      if (xiaohongshuResult == null ? void 0 : xiaohongshuResult.success) {
+        new import_obsidian14.Notice("\u5C0F\u7EA2\u4E66\u8349\u7A3F\u5DF2\u6392\u7248\u5E76\u4FDD\u5B58");
+      } else {
+        new import_obsidian14.Notice(`\u5C0F\u7EA2\u4E66\u8349\u7A3F\u4FDD\u5B58\u5931\u8D25: ${((_a = xiaohongshuResult == null ? void 0 : xiaohongshuResult.error) == null ? void 0 : _a.message) || "\u672A\u77E5\u9519\u8BEF"}`);
+      }
+    } catch (error) {
+      new import_obsidian14.Notice(`\u5C0F\u7EA2\u4E66\u6392\u7248\u5E76\u53D1\u5E03\u5931\u8D25: ${error instanceof Error ? error.message : "\u672A\u77E5\u9519\u8BEF"}`);
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async createXiaohongshuFormattedText(markdown) {
+    var _a;
+    const prompt = buildXiaohongshuFormattingPrompt(this.settings.xiaohongshuFormatting.rules);
+    this.statusBarService.setProcessing("\u5C0F\u7EA2\u4E66\u6392\u7248");
+    new import_obsidian14.Notice("\u6B63\u5728\u8FDB\u884C\u5C0F\u7EA2\u4E66\u6392\u7248...");
+    const response = await this.aiService.chat(prompt, markdown);
+    if (!response.success || !response.content) {
+      this.statusBarService.setError(response.error || "\u5C0F\u7EA2\u4E66\u6392\u7248\u5931\u8D25");
+      throw new Error(response.error || "\u5C0F\u7EA2\u4E66\u6392\u7248\u5931\u8D25");
+    }
+    this.statusBarService.setCompleted((_a = response.tokensUsed) == null ? void 0 : _a.total);
+    return response.content.trim();
+  }
   isPublishingPlatformConfigured(platform) {
     const settings = this.settings.publishing.platforms[platform];
     if (!settings.enabled)
@@ -7185,6 +7966,8 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.shortcutsService.registerAll((actionId, customPromptId) => {
       if (actionId === "wechat-insert-images") {
         this.executeWeChatImageInsertion();
+      } else if (actionId === "generate-short-video") {
+        this.executeShortVideoGeneration();
       } else if (actionId === "custom" && customPromptId) {
         this.executeCustomPrompt(customPromptId);
       } else {
@@ -7229,7 +8012,7 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
    * Refresh custom prompt commands
    */
   refreshCustomPromptCommands() {
-    const prompts = this.customPromptsService.getAll();
+    const prompts = this.customPromptsService.getEnabled();
     for (const prompt of prompts) {
       this.addCommand({
         id: `custom-${prompt.id}`,
@@ -7360,13 +8143,25 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
       return;
     }
+    const prompt = this.customPromptsService.getById(promptId);
+    if (!prompt) {
+      new import_obsidian14.Notice("Prompt \u4E0D\u5B58\u5728");
+      return;
+    }
+    if (prompt.enabled === false) {
+      new import_obsidian14.Notice("\u8BE5 Prompt \u5DF2\u5173\u95ED");
+      return;
+    }
+    if (prompt.automationAction === "xiaohongshu-format") {
+      await this.formatXiaohongshuDraft();
+      return;
+    }
+    if (prompt.automationAction === "xiaohongshu-format-publish") {
+      await this.formatAndPublishXiaohongshuDraft();
+      return;
+    }
     this.isProcessing = true;
     try {
-      const prompt = this.customPromptsService.getById(promptId);
-      if (!prompt) {
-        new import_obsidian14.Notice("Prompt \u4E0D\u5B58\u5728");
-        return;
-      }
       const file = this.app.workspace.getActiveFile();
       if (!file) {
         new import_obsidian14.Notice("\u6CA1\u6709\u6253\u5F00\u7684\u7B14\u8BB0");
@@ -7424,6 +8219,23 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       this.isProcessing = false;
     }
   }
+  async executeShortVideoGeneration() {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.videoGenerationWorkflow.run();
+      if (result.success) {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5B8C\u6210\uFF1A${result.outputPath || ""}`);
+      } else {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
   /**
    * Get action display name
    */
@@ -7434,6 +8246,7 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     }
     const names = {
       "wechat-insert-images": "\u516C\u4F17\u53F7\u4E00\u952E\u63D2\u5165\u56FE\u7247",
+      "generate-short-video": "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891",
       summarize: "\u603B\u7ED3",
       outline: "\u5927\u7EB2",
       translate: "\u7FFB\u8BD1",
@@ -7634,14 +8447,18 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
         this.plugin.executeAction(action.type, !!selectedText);
       });
     }
-    const customPrompts = this.plugin.getCustomPromptsService().getAll();
+    const customPrompts = this.plugin.getCustomPromptsService().getEnabled();
     let renderedWeChatImageAction = false;
+    let renderedVideoGenerationAction = false;
     if (customPrompts.length > 0) {
       const grouped = this.groupByCategory(customPrompts);
       for (const [categoryId, prompts] of grouped) {
         const isWeChatCategory = categoryId === "wechat";
+        const isVideoCategory = categoryId === "video";
         if (isWeChatCategory)
           renderedWeChatImageAction = true;
+        if (isVideoCategory)
+          renderedVideoGenerationAction = true;
         const categoryClass = categoryId.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "uncategorized";
         const category = PRESET_CATEGORIES.find((c) => c.id === categoryId) || {
           id: categoryId,
@@ -7658,7 +8475,7 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
           cls: "category-title"
         });
         header2.createEl("span", {
-          text: String(prompts.length + (isWeChatCategory ? 1 : 0)),
+          text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 1 : 0)),
           cls: "category-count"
         });
         const buttonsContainer2 = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
@@ -7680,6 +8497,15 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
             this.plugin.executeWeChatImageInsertion();
           });
         }
+        if (isVideoCategory) {
+          const videoButton = buttonsContainer2.createEl("button", {
+            cls: "ai-workbench-action-btn custom ai-workbench-generate-video",
+            text: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891"
+          });
+          videoButton.addEventListener("click", () => {
+            this.plugin.executeShortVideoGeneration();
+          });
+        }
       }
     }
     if (!renderedWeChatImageAction) {
@@ -7696,6 +8522,22 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
       });
       imageButton.addEventListener("click", () => {
         this.plugin.executeWeChatImageInsertion();
+      });
+    }
+    if (!renderedVideoGenerationAction) {
+      const categoryContainer = container.createDiv({
+        cls: "ai-workbench-category ai-workbench-category--video"
+      });
+      const header2 = categoryContainer.createDiv({ cls: "ai-workbench-category-header" });
+      header2.createEl("span", { text: "\u{1F4F1} \u77ED\u89C6\u9891", cls: "category-title" });
+      header2.createEl("span", { text: "1", cls: "category-count" });
+      const videoButtons = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
+      const videoButton = videoButtons.createEl("button", {
+        cls: "ai-workbench-action-btn custom ai-workbench-generate-video",
+        text: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891"
+      });
+      videoButton.addEventListener("click", () => {
+        this.plugin.executeShortVideoGeneration();
       });
     }
     this.publishingContainer = container.createDiv({ cls: "ai-workbench-publishing" });

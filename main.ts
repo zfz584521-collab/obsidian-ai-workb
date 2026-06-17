@@ -16,7 +16,7 @@ import {
     setIcon,
     requestUrl
 } from 'obsidian';
-import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt } from './src/types';
+import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt, DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS } from './src/types';
 import { AIService } from './src/services/ai';
 import { BackupService } from './src/services/backup';
 import { BackupManager } from './src/services/backup-manager';
@@ -38,6 +38,11 @@ import { WeChatImageWorkflow } from './src/wechat-images/workflow';
 import { ImageTaskPreviewService } from './src/wechat-images/task-preview';
 import { OpenAICompatibleImageProvider } from './src/wechat-images/image-provider';
 import { createObsidianImageFetch } from './src/wechat-images/obsidian-http';
+import {
+    AIShortVideoPromptBuilder,
+    VideoGenerationWorkflow
+} from './src/video-generation/workflow';
+import { OpenAICompatibleVideoProvider } from './src/video-generation/video-provider';
 import { mergePublishingSettings } from './src/publishing/defaults';
 import {
     PUBLISHING_PLATFORMS,
@@ -49,6 +54,11 @@ import { WebhookClient } from './src/publishing/webhook';
 import { PublishingAdapterFactory } from './src/publishing/adapters';
 import { PublishingService } from './src/publishing/service';
 import { PublishEditorModal } from './src/publishing/modal';
+import {
+    buildXiaohongshuFormattingPrompt,
+    DEFAULT_XIAOHONGSHU_FORMATTING_RULES,
+    parseXiaohongshuFormattedDraft
+} from './src/xiaohongshu/formatting';
 import { i18n, t } from './src/i18n';
 
 const VIEW_TYPE = 'ai-workbench-view';
@@ -70,6 +80,7 @@ export default class AIWorkbenchPlugin extends Plugin {
     private helpService: HelpService;
     private actionHandler: ActionHandler;
     private weChatImageWorkflow: WeChatImageWorkflow;
+    private videoGenerationWorkflow: VideoGenerationWorkflow;
     private contentExtractor: ObsidianContentExtractor;
     private publishingService: PublishingService;
     private publishingHistory: PublishingHistoryEntry[] = [];
@@ -130,6 +141,14 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.settings.images,
             value => new OpenAICompatibleImageProvider(value, obsidianFetch)
         );
+        this.videoGenerationWorkflow = new VideoGenerationWorkflow(
+            this.app,
+            this.statusBarService,
+            new AIShortVideoPromptBuilder(this.aiService),
+            this.settings.videos,
+            value => new OpenAICompatibleVideoProvider(value, obsidianFetch),
+            MarkdownView
+        );
 
         // Context menu
         this.contextMenuService = new ContextMenuService(
@@ -138,7 +157,7 @@ export default class AIWorkbenchPlugin extends Plugin {
             this.settings.contextMenu,
             (action, isSelection) => this.executeAction(action, isSelection),
             (id) => this.executeCustomPrompt(id),
-            () => this.customPromptsService.getAll(),
+            () => this.customPromptsService.getEnabled(),
             (file) => this.executeWeChatImageInsertion(file)
         );
 
@@ -176,6 +195,11 @@ export default class AIWorkbenchPlugin extends Plugin {
             id: 'wechat-insert-images',
             name: '公众号一键插入图片',
             callback: () => this.executeWeChatImageInsertion()
+        });
+        this.addCommand({
+            id: 'generate-short-video',
+            name: '一键生成短视频',
+            callback: () => this.executeShortVideoGeneration()
         });
 
         // Add backup management command
@@ -261,6 +285,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.settings = {
             api: { ...DEFAULT_SETTINGS.api, ...saved?.api },
             images: { ...DEFAULT_SETTINGS.images, ...saved?.images },
+            videos: { ...DEFAULT_SETTINGS.videos, ...saved?.videos },
             output: { ...DEFAULT_SETTINGS.output, ...saved?.output },
             backup: { ...DEFAULT_SETTINGS.backup, ...saved?.backup },
             claudian: { ...DEFAULT_SETTINGS.claudian, ...saved?.claudian },
@@ -269,8 +294,31 @@ export default class AIWorkbenchPlugin extends Plugin {
             contextMenu: { ...DEFAULT_SETTINGS.contextMenu, ...saved?.contextMenu },
             ui: { ...DEFAULT_SETTINGS.ui, ...saved?.ui },
             publishing: mergePublishingSettings(saved?.publishing),
+            xiaohongshuFormatting: {
+                ...DEFAULT_SETTINGS.xiaohongshuFormatting,
+                ...saved?.xiaohongshuFormatting,
+                rules: saved?.xiaohongshuFormatting?.rules?.trim()
+                    || DEFAULT_XIAOHONGSHU_FORMATTING_RULES
+            },
             i18n: { ...DEFAULT_SETTINGS.i18n, ...saved?.i18n }
         };
+        this.settings.customPrompts.prompts = this.withDefaultAutomationPrompts(this.settings.customPrompts.prompts);
+    }
+
+    private withDefaultAutomationPrompts(prompts: CustomPrompt[] = []): CustomPrompt[] {
+        const merged = [...prompts];
+        for (const defaultPrompt of DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS) {
+            const exists = merged.some(prompt =>
+                prompt.id === defaultPrompt.id || prompt.automationAction === defaultPrompt.automationAction
+            );
+            if (!exists) {
+                merged.push({ ...defaultPrompt });
+            }
+        }
+        return merged.map(prompt => ({
+            ...prompt,
+            enabled: prompt.enabled !== false
+        }));
     }
 
     async saveSettings() {
@@ -286,6 +334,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.contextMenuService.updateSettings(this.settings.contextMenu);
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
         this.weChatImageWorkflow.updateSettings(this.settings.images);
+        this.videoGenerationWorkflow?.updateSettings(this.settings.videos);
         this.publishingService?.updateSettings(this.settings.publishing);
         this.refreshWorkbenchViews();
     }
@@ -356,6 +405,107 @@ export default class AIWorkbenchPlugin extends Plugin {
         ).open();
     }
 
+    async formatXiaohongshuDraft(): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const file = this.app.workspace.getActiveFile();
+            if (!file || file.extension !== 'md') {
+                new Notice('请先打开一篇 Markdown 笔记');
+                return;
+            }
+
+            const markdown = await this.app.vault.read(file);
+            const formatted = await this.createXiaohongshuFormattedText(markdown);
+            const newFile = await this.fileService.createNewFile(
+                file,
+                'xiaohongshu-formatted',
+                formatted
+            );
+            new Notice(`小红书排版完成: ${newFile.path}`);
+        } catch (error) {
+            new Notice(`小红书排版失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    async formatAndPublishXiaohongshuDraft(): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const file = this.app.workspace.getActiveFile();
+            if (!file || file.extension !== 'md') {
+                new Notice('请先打开一篇 Markdown 笔记');
+                return;
+            }
+            if (!this.isPublishingPlatformConfigured('xiaohongshu')) {
+                new Notice('请先配置小红书发布平台');
+                this.openPublishingSettings();
+                return;
+            }
+
+            const markdown = await this.app.vault.read(file);
+            const formatted = await this.createXiaohongshuFormattedText(markdown);
+            const formattedDraft = parseXiaohongshuFormattedDraft(formatted);
+            const extracted = await this.contentExtractor.extract(file);
+            const publishContent = {
+                ...extracted,
+                title: formattedDraft.title,
+                titleOptions: formattedDraft.titleOptions,
+                bodyMarkdown: formattedDraft.bodyMarkdown,
+                tags: formattedDraft.tags.length > 0 ? formattedDraft.tags : extracted.tags
+            };
+
+            if (publishContent.cover) {
+                publishContent.cover = await this.contentExtractor.loadMedia(publishContent.cover);
+            }
+            publishContent.images = await Promise.all(
+                publishContent.images.map(media => this.contentExtractor.loadMedia(media))
+            );
+            if (publishContent.video) {
+                publishContent.video = await this.contentExtractor.loadMedia(publishContent.video);
+            }
+
+            const result = await this.publishingService.publishAll({
+                content: publishContent,
+                overrides: {},
+                platforms: ['xiaohongshu']
+            });
+            const xiaohongshuResult = result.results.xiaohongshu;
+            if (xiaohongshuResult?.success) {
+                new Notice('小红书草稿已排版并保存');
+            } else {
+                new Notice(`小红书草稿保存失败: ${xiaohongshuResult?.error?.message || '未知错误'}`);
+            }
+        } catch (error) {
+            new Notice(`小红书排版并发布失败: ${error instanceof Error ? error.message : '未知错误'}`);
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async createXiaohongshuFormattedText(markdown: string): Promise<string> {
+        const prompt = buildXiaohongshuFormattingPrompt(this.settings.xiaohongshuFormatting.rules);
+        this.statusBarService.setProcessing('小红书排版');
+        new Notice('正在进行小红书排版...');
+        const response = await this.aiService.chat(prompt, markdown);
+        if (!response.success || !response.content) {
+            this.statusBarService.setError(response.error || '小红书排版失败');
+            throw new Error(response.error || '小红书排版失败');
+        }
+        this.statusBarService.setCompleted(response.tokensUsed?.total);
+        return response.content.trim();
+    }
+
     isPublishingPlatformConfigured(platform: PublishingPlatform): boolean {
         const settings = this.settings.publishing.platforms[platform];
         if (!settings.enabled) return false;
@@ -416,6 +566,8 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.shortcutsService.registerAll((actionId, customPromptId) => {
             if (actionId === 'wechat-insert-images') {
                 this.executeWeChatImageInsertion();
+            } else if (actionId === 'generate-short-video') {
+                this.executeShortVideoGeneration();
             } else if (actionId === 'custom' && customPromptId) {
                 this.executeCustomPrompt(customPromptId);
             } else {
@@ -463,7 +615,7 @@ export default class AIWorkbenchPlugin extends Plugin {
      * Refresh custom prompt commands
      */
     refreshCustomPromptCommands() {
-        const prompts = this.customPromptsService.getAll();
+        const prompts = this.customPromptsService.getEnabled();
         for (const prompt of prompts) {
             this.addCommand({
                 id: `custom-${prompt.id}`,
@@ -612,15 +764,27 @@ export default class AIWorkbenchPlugin extends Plugin {
             return;
         }
 
+        const prompt = this.customPromptsService.getById(promptId);
+        if (!prompt) {
+            new Notice('Prompt 不存在');
+            return;
+        }
+        if (prompt.enabled === false) {
+            new Notice('该 Prompt 已关闭');
+            return;
+        }
+        if (prompt.automationAction === 'xiaohongshu-format') {
+            await this.formatXiaohongshuDraft();
+            return;
+        }
+        if (prompt.automationAction === 'xiaohongshu-format-publish') {
+            await this.formatAndPublishXiaohongshuDraft();
+            return;
+        }
+
         this.isProcessing = true;
 
         try {
-            const prompt = this.customPromptsService.getById(promptId);
-            if (!prompt) {
-                new Notice('Prompt 不存在');
-                return;
-            }
-
             const file = this.app.workspace.getActiveFile();
             if (!file) {
                 new Notice('没有打开的笔记');
@@ -687,6 +851,25 @@ export default class AIWorkbenchPlugin extends Plugin {
         }
     }
 
+    async executeShortVideoGeneration(): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.videoGenerationWorkflow.run();
+            if (result.success) {
+                new Notice(`短视频生成完成：${result.outputPath || ''}`);
+            } else {
+                new Notice(`短视频生成失败：${result.error || '未知错误'}`);
+            }
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
     /**
      * Get action display name
      */
@@ -698,6 +881,7 @@ export default class AIWorkbenchPlugin extends Plugin {
 
         const names: Record<string, string> = {
             'wechat-insert-images': '公众号一键插入图片',
+            'generate-short-video': '一键生成短视频',
             summarize: '总结',
             outline: '大纲',
             translate: '翻译',
@@ -941,14 +1125,17 @@ class WorkbenchView extends ItemView {
         }
 
         // Custom Prompts - grouped by category
-        const customPrompts = this.plugin.getCustomPromptsService().getAll();
+        const customPrompts = this.plugin.getCustomPromptsService().getEnabled();
         let renderedWeChatImageAction = false;
+        let renderedVideoGenerationAction = false;
         if (customPrompts.length > 0) {
             const grouped = this.groupByCategory(customPrompts);
 
             for (const [categoryId, prompts] of grouped) {
                 const isWeChatCategory = categoryId === 'wechat';
+                const isVideoCategory = categoryId === 'video';
                 if (isWeChatCategory) renderedWeChatImageAction = true;
+                if (isVideoCategory) renderedVideoGenerationAction = true;
                 const categoryClass = categoryId
                     .toLowerCase()
                     .replace(/[^a-z0-9-]/g, '-')
@@ -971,7 +1158,7 @@ class WorkbenchView extends ItemView {
                     cls: 'category-title'
                 });
                 header.createEl('span', {
-                    text: String(prompts.length + (isWeChatCategory ? 1 : 0)),
+                    text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 1 : 0)),
                     cls: 'category-count'
                 });
 
@@ -996,6 +1183,17 @@ class WorkbenchView extends ItemView {
                         this.plugin.executeWeChatImageInsertion();
                     });
                 }
+
+                if (isVideoCategory) {
+                    const videoButton = buttonsContainer.createEl('button', {
+                        cls: 'ai-workbench-action-btn custom ai-workbench-generate-video',
+                        text: '一键生成短视频'
+                    });
+                    videoButton.addEventListener('click', () => {
+                        this.plugin.executeShortVideoGeneration();
+                    });
+                }
+
             }
         }
 
@@ -1013,6 +1211,23 @@ class WorkbenchView extends ItemView {
             });
             imageButton.addEventListener('click', () => {
                 this.plugin.executeWeChatImageInsertion();
+            });
+        }
+
+        if (!renderedVideoGenerationAction) {
+            const categoryContainer = container.createDiv({
+                cls: 'ai-workbench-category ai-workbench-category--video'
+            });
+            const header = categoryContainer.createDiv({ cls: 'ai-workbench-category-header' });
+            header.createEl('span', { text: '📱 短视频', cls: 'category-title' });
+            header.createEl('span', { text: '1', cls: 'category-count' });
+            const videoButtons = categoryContainer.createDiv({ cls: 'ai-workbench-buttons' });
+            const videoButton = videoButtons.createEl('button', {
+                cls: 'ai-workbench-action-btn custom ai-workbench-generate-video',
+                text: '一键生成短视频'
+            });
+            videoButton.addEventListener('click', () => {
+                this.plugin.executeShortVideoGeneration();
             });
         }
 

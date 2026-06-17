@@ -40,6 +40,8 @@ data.json
 backups/
 stats.json
 .superpowers/
+.edge-xhs-profile/
+.xhs-upload-cache/
 
 # Release packages
 *.zip

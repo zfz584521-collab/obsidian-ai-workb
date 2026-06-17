@@ -55,3 +55,26 @@ test('category cards use restrained accents and neutral action buttons', () => {
         'custom action buttons should use a neutral solid border'
     );
 });
+
+test('Xiaohongshu automation actions render inside the Xiaohongshu category', () => {
+    assert.doesNotMatch(
+        mainSource,
+        /小红书自动化/,
+        'Xiaohongshu automation should not render as a separate category'
+    );
+    assert.match(
+        mainSource,
+        /getCustomPromptsService\(\)\.getEnabled\(\)/,
+        'the sidebar should render enabled custom prompts'
+    );
+    assert.match(
+        mainSource,
+        /prompts\.length \+ \(isWeChatCategory \? 1 : 0\)/,
+        'the category count should come from enabled prompts plus the WeChat image action'
+    );
+    assert.doesNotMatch(
+        mainSource,
+        /if \(isXiaohongshuCategory\)[\s\S]*formatXiaohongshuDraft\(\)[\s\S]*formatAndPublishXiaohongshuDraft\(\)/,
+        'Xiaohongshu automation should not be appended as fixed buttons'
+    );
+});

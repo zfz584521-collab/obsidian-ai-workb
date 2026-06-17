@@ -7,6 +7,7 @@ import type AIWorkbenchPlugin from '../main';
 import { WorkbenchSettings, CustomPrompt, ShortcutBinding } from './types';
 import { SETTINGS_DEBOUNCE_MS, MIN_API_KEY_LENGTH, API_KEY_MASK_LENGTH } from './constants';
 import { PublishingSettingsRenderer } from './publishing/settings-ui';
+import { DEFAULT_XIAOHONGSHU_FORMATTING_RULES } from './xiaohongshu/formatting';
 import { t, i18n } from './i18n';
 
 export class WorkbenchSettingTab extends PluginSettingTab {
@@ -234,6 +235,126 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        // Video Generation Settings
+        containerEl.createEl('h2', { text: t('settings.videoGeneration') });
+
+        new Setting(containerEl)
+            .setName(t('settings.videoProvider'))
+            .setDesc(t('settings.videoProviderDesc'))
+            .addDropdown(dropdown => dropdown
+                .addOption('openai-compatible', 'OpenAI 兼容 API')
+                .addOption('webhook', 'Webhook')
+                .setValue(this.plugin.settings.videos.provider)
+                .onChange(async (value: 'openai-compatible' | 'webhook') => {
+                    this.plugin.settings.videos.provider = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoApiEndpoint'))
+            .setDesc(t('settings.videoApiEndpointDesc'))
+            .addText(text => text
+                .setPlaceholder('https://api.example.com/v1')
+                .setValue(this.plugin.settings.videos.endpoint)
+                .onChange(debounce(async (value: string) => {
+                    if (value && !this.validateEndpoint(value)) {
+                        new Notice(t('validation.httpsRequired'));
+                        return;
+                    }
+                    this.plugin.settings.videos.endpoint = value;
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoApiKey'))
+            .setDesc(t('settings.videoApiKeyDesc'))
+            .addText(text => text
+                .setPlaceholder('sk-...')
+                .setValue(this.maskApiKey(this.plugin.settings.videos.apiKey))
+                .onChange(debounce(async (value: string) => {
+                    if (value.includes('...')) return;
+                    this.plugin.settings.videos.apiKey = value;
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoModel'))
+            .addText(text => text
+                .setPlaceholder('video-model')
+                .setValue(this.plugin.settings.videos.model)
+                .onChange(debounce(async (value: string) => {
+                    this.plugin.settings.videos.model = value.trim();
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoSize'))
+            .setDesc(t('settings.videoSizeDesc'))
+            .addText(text => text
+                .setPlaceholder('1080x1920')
+                .setValue(this.plugin.settings.videos.size)
+                .onChange(debounce(async (value: string) => {
+                    this.plugin.settings.videos.size = value.trim();
+                    await this.plugin.saveSettings();
+                }, SETTINGS_DEBOUNCE_MS)));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoDuration'))
+            .setDesc(t('settings.videoDurationDesc'))
+            .addSlider(slider => slider
+                .setLimits(1, 60, 1)
+                .setValue(this.plugin.settings.videos.duration)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.videos.duration = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.videoTimeout'))
+            .setDesc(t('settings.videoTimeoutDesc'))
+            .addSlider(slider => slider
+                .setLimits(60, 1800, 60)
+                .setValue(this.plugin.settings.videos.timeout)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.videos.timeout = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.retryCount'))
+            .addSlider(slider => slider
+                .setLimits(0, 5, 1)
+                .setValue(this.plugin.settings.videos.retryCount)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.videos.retryCount = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.pollInterval'))
+            .addSlider(slider => slider
+                .setLimits(1, 30, 1)
+                .setValue(this.plugin.settings.videos.pollInterval)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.videos.pollInterval = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName(t('settings.maxPollAttempts'))
+            .addSlider(slider => slider
+                .setLimits(1, 240, 1)
+                .setValue(this.plugin.settings.videos.maxPollAttempts)
+                .setDynamicTooltip()
+                .onChange(async value => {
+                    this.plugin.settings.videos.maxPollAttempts = value;
+                    await this.plugin.saveSettings();
+                }));
+
         // Output Settings
         containerEl.createEl('h2', { text: t('settings.outputSettings') });
 
@@ -272,6 +393,26 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                     this.plugin.settings.output.includeTimestamp = value;
                     await this.plugin.saveSettings();
                 }));
+
+        // Xiaohongshu Formatting
+        containerEl.createEl('h2', { text: '小红书自动排版' });
+        const formattingRules = this.plugin.settings.xiaohongshuFormatting.rules;
+
+        new Setting(containerEl)
+            .setName('排版规则')
+            .setDesc('用于“小红书自动排版”和“排版并发布草稿”的自定义规则。留空时会恢复默认规则。')
+            .addTextArea(text => {
+                text.inputEl.rows = 12;
+                text.inputEl.addClass('ai-workbench-xiaohongshu-formatting-rules');
+                text
+                    .setPlaceholder(DEFAULT_XIAOHONGSHU_FORMATTING_RULES)
+                    .setValue(formattingRules)
+                    .onChange(debounce(async (value: string) => {
+                        this.plugin.settings.xiaohongshuFormatting.rules =
+                            value.trim() || DEFAULT_XIAOHONGSHU_FORMATTING_RULES;
+                        await this.plugin.saveSettings();
+                    }, SETTINGS_DEBOUNCE_MS));
+            });
 
         // Backup Settings
         containerEl.createEl('h2', { text: t('settings.backupSettings') });
@@ -504,6 +645,17 @@ export class WorkbenchSettingTab extends PluginSettingTab {
 
             const actions = item.createDiv({ cls: 'prompt-actions' });
 
+            new Setting(actions)
+                .setName(prompt.enabled === false ? '已关闭' : '已启用')
+                .addToggle(toggle => toggle
+                    .setValue(prompt.enabled !== false)
+                    .onChange(async (value) => {
+                        this.plugin.getCustomPromptsService().update(prompt.id, { enabled: value });
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshCustomPromptCommands();
+                        this.display();
+                    }));
+
             actions.createEl('button', { text: t('common.edit') }, btn => {
                 btn.addEventListener('click', () => {
                     const modal = new CustomPromptModal(this.app, async (updated) => {
@@ -515,14 +667,16 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 });
             });
 
-            actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
-                btn.addEventListener('click', async () => {
-                    this.plugin.getCustomPromptsService().delete(prompt.id);
-                    await this.plugin.saveSettings();
-                    this.plugin.refreshCustomPromptCommands();
-                    this.display();
+            if (!prompt.automationAction) {
+                actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
+                    btn.addEventListener('click', async () => {
+                        this.plugin.getCustomPromptsService().delete(prompt.id);
+                        await this.plugin.saveSettings();
+                        this.plugin.refreshCustomPromptCommands();
+                        this.display();
+                    });
                 });
-            });
+            }
         }
     }
 
@@ -604,6 +758,7 @@ class CustomPromptModal extends Modal {
     private description: string = '';
     private prompt: string = '';
     private outputMode: 'append' | 'prepend' | 'newFile' | 'replace' | 'selection' = 'append';
+    private enabled: boolean = true;
 
     constructor(
         app: App,
@@ -619,6 +774,7 @@ class CustomPromptModal extends Modal {
             this.description = existingPrompt.description;
             this.prompt = existingPrompt.prompt;
             this.outputMode = existingPrompt.outputMode;
+            this.enabled = existingPrompt.enabled !== false;
         }
     }
 
@@ -653,6 +809,13 @@ class CustomPromptModal extends Modal {
                 .onChange(value => this.prompt = value));
 
         new Setting(contentEl)
+            .setName('启用 Prompt')
+            .setDesc('关闭后不会显示在侧边栏、右键菜单和命令入口中')
+            .addToggle(toggle => toggle
+                .setValue(this.enabled)
+                .onChange(value => this.enabled = value));
+
+        new Setting(contentEl)
             .setName(t('settings.outputMode'))
             .addDropdown(dropdown => dropdown
                 .addOption('append', t('settings.outputModeAppend'))
@@ -683,7 +846,10 @@ class CustomPromptModal extends Modal {
                         name: this.name.trim(),
                         description: this.description.trim(),
                         prompt: this.prompt.trim(),
-                        outputMode: this.outputMode
+                        outputMode: this.outputMode,
+                        enabled: this.enabled,
+                        category: this.existingPrompt?.category,
+                        automationAction: this.existingPrompt?.automationAction
                     });
                     this.close();
                 }));
@@ -733,6 +899,7 @@ class ShortcutModal extends Modal {
                 dropdown.addOption('mindmap', t('actions.mindmap'));
                 dropdown.addOption('mermaid', t('actions.mermaid'));
                 dropdown.addOption('wechat-insert-images', t('actions.wechatInsertImages'));
+                dropdown.addOption('generate-short-video', '一键生成短视频');
 
                 for (const prompt of this.customPrompts) {
                     dropdown.addOption(`custom:${prompt.id}`, `${t('actions.custom')}: ${prompt.name}`);

@@ -124,24 +124,21 @@ export class PublishEditorModal extends Modal {
 
 	private renderBaseEditor(container: HTMLElement): void {
         const titleOptions = this.state.base.titleOptions || [];
-        const selectedTitleIndex = titleOptions.indexOf(this.state.base.title);
 		const titleSetting = new Setting(container)
 			.setClass('ai-workbench-publish-setting')
 			.setClass('ai-workbench-publish-setting--title')
             .setClass('ai-workbench-publish-title-picker')
 			.setName(t('publishing.title'));
-        if (titleOptions.length > 0) {
-            titleSetting.addDropdown(dropdown => {
-                titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
-                dropdown.addOption('custom', '自定义');
-                dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : 'custom');
-                dropdown.onChange(value => {
-                    if (value === 'custom') return;
-                    this.state.base.title = titleOptions[Number(value)] || this.state.base.title;
-                    this.render();
-                });
-            });
-        }
+        this.renderTitleOptionDropdown(
+            titleSetting,
+            titleOptions,
+            this.state.base.title,
+            false,
+            value => {
+                this.state.base.title = value;
+                this.render();
+            }
+        );
         titleSetting.addText(text => {
             text.inputEl.addClass('ai-workbench-custom-title');
             text
@@ -236,11 +233,43 @@ export class PublishEditorModal extends Modal {
                     .onChange(value => this.state.setOverride(platform, field, value));
             });
         } else {
+            if (field === 'title') {
+                setting.setClass('ai-workbench-platform-title-picker');
+                this.renderTitleOptionDropdown(
+                    setting,
+                    resolved.titleOptions || [],
+                    String(resolved[field] || ''),
+                    !enabled,
+                    value => this.state.setOverride(platform, field, value)
+                );
+            }
             setting.addText(text => text
                 .setValue(String(resolved[field] || ''))
                 .setDisabled(!enabled)
                 .onChange(value => this.state.setOverride(platform, field, value)));
         }
+    }
+
+    private renderTitleOptionDropdown(
+        setting: Setting,
+        titleOptions: string[],
+        selectedTitle: string,
+        disabled: boolean,
+        onSelect: (value: string) => void
+    ): void {
+        if (titleOptions.length === 0) return;
+        const selectedTitleIndex = titleOptions.indexOf(selectedTitle);
+        setting.addDropdown(dropdown => {
+            titleOptions.forEach((option, index) => dropdown.addOption(String(index), option));
+            dropdown.addOption('custom', '自定义');
+            dropdown.setValue(selectedTitleIndex >= 0 ? String(selectedTitleIndex) : 'custom');
+            dropdown.setDisabled(disabled);
+            dropdown.onChange(value => {
+                if (value === 'custom') return;
+                onSelect(titleOptions[Number(value)] || selectedTitle);
+                this.render();
+            });
+        });
     }
 
     private renderOverrideTags(container: HTMLElement): void {

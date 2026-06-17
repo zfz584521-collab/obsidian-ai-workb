@@ -105,6 +105,8 @@ export interface ICustomPromptsService {
      */
     getAll(): CustomPrompt[];
 
+    getEnabled(): CustomPrompt[];
+
     /**
      * Get a specific prompt by ID
      */

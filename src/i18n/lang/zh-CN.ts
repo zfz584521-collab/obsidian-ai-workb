@@ -65,6 +65,24 @@ export const zhCN: Translations = {
     keepOriginalPromptsDesc: '关闭时，成功生成的图片会替换原配图区块',
     seconds: '秒',
 
+    // Video Generation
+    videoGeneration: '短视频生成',
+    videoProvider: '视频提供商',
+    videoProviderDesc: '支持 OpenAI 兼容视频 API 和 Webhook 网关',
+    videoApiEndpoint: '视频 API 基础地址',
+    videoApiEndpointDesc: '兼容网关会自动调用 /videos/generations',
+    videoApiKey: '视频 API Key',
+    videoApiKeyDesc: '仅保存在本地插件设置中',
+    videoModel: '视频模型',
+    videoSize: '视频尺寸',
+    videoSizeDesc: '竖屏短视频默认 1080x1920',
+    videoDuration: '视频时长',
+    videoDurationDesc: '单位：秒',
+    videoTimeout: '视频请求超时',
+    videoTimeoutDesc: '单位：秒，视频生成可能需要数分钟',
+    pollInterval: '轮询间隔',
+    maxPollAttempts: '最大轮询次数',
+
     // Output Settings
     outputSettings: '输出设置',
     summaryPosition: '总结位置',

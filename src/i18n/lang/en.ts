@@ -65,6 +65,24 @@ export const en: Translations = {
     keepOriginalPromptsDesc: 'When disabled, successfully generated images replace original image blocks',
     seconds: 'seconds',
 
+    // Video Generation
+    videoGeneration: 'Video Generation',
+    videoProvider: 'Video Provider',
+    videoProviderDesc: 'Supports OpenAI-compatible video APIs and webhook-compatible gateways',
+    videoApiEndpoint: 'Video API Base URL',
+    videoApiEndpointDesc: 'For compatible gateways, the plugin calls /videos/generations',
+    videoApiKey: 'Video API Key',
+    videoApiKeyDesc: 'Stored locally in plugin settings only',
+    videoModel: 'Video Model',
+    videoSize: 'Video Size',
+    videoSizeDesc: 'Vertical short video default is 1080x1920',
+    videoDuration: 'Video Duration',
+    videoDurationDesc: 'In seconds',
+    videoTimeout: 'Video Request Timeout',
+    videoTimeoutDesc: 'In seconds. Video generation can take several minutes',
+    pollInterval: 'Polling Interval',
+    maxPollAttempts: 'Max Poll Attempts',
+
     // Output Settings
     outputSettings: 'Output Settings',
     summaryPosition: 'Summary Position',

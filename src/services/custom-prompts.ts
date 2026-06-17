@@ -23,6 +23,10 @@ export class CustomPromptsService implements ICustomPromptsService {
         return this.settings.prompts || [];
     }
 
+    getEnabled(): CustomPrompt[] {
+        return this.getAll().filter(prompt => prompt.enabled !== false);
+    }
+
     /**
      * Get a specific prompt by ID
      */
@@ -101,7 +105,10 @@ export class CustomPromptsService implements ICustomPromptsService {
                     name: prompt.name,
                     description: prompt.description || '',
                     prompt: prompt.prompt,
-                    outputMode: prompt.outputMode || 'append'
+                    outputMode: prompt.outputMode || 'append',
+                    category: prompt.category,
+                    enabled: prompt.enabled !== false,
+                    automationAction: prompt.automationAction
                 });
                 imported++;
             } catch (e) {

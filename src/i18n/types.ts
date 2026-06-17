@@ -67,6 +67,24 @@ export interface SettingsTranslations {
   keepOriginalPromptsDesc: string;
   seconds: string;
 
+  // Video Generation
+  videoGeneration: string;
+  videoProvider: string;
+  videoProviderDesc: string;
+  videoApiEndpoint: string;
+  videoApiEndpointDesc: string;
+  videoApiKey: string;
+  videoApiKeyDesc: string;
+  videoModel: string;
+  videoSize: string;
+  videoSizeDesc: string;
+  videoDuration: string;
+  videoDurationDesc: string;
+  videoTimeout: string;
+  videoTimeoutDesc: string;
+  pollInterval: string;
+  maxPollAttempts: string;
+
   // Output Settings
   outputSettings: string;
   summaryPosition: string;

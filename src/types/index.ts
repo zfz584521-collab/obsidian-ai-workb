@@ -6,8 +6,13 @@ import {
     DEFAULT_IMAGE_SETTINGS,
     ImageGenerationSettings
 } from '../wechat-images/types';
+import {
+    DEFAULT_VIDEO_SETTINGS,
+    VideoGenerationSettings
+} from '../video-generation/types';
 import { DEFAULT_PUBLISHING_SETTINGS } from '../publishing/defaults';
 import { PublishingSettings } from '../publishing/types';
+import { DEFAULT_XIAOHONGSHU_FORMATTING_RULES } from '../xiaohongshu/formatting';
 
 // ============ Settings ============
 
@@ -44,6 +49,8 @@ export interface CustomPrompt {
     prompt: string;
     outputMode: 'append' | 'prepend' | 'newFile' | 'replace' | 'selection';
     category?: string; // Category ID: basic, xiaohongshu, video, wechat, translate, code, other
+    enabled?: boolean;
+    automationAction?: 'xiaohongshu-format' | 'xiaohongshu-format-publish';
     variables?: PromptVariable[];
     createdAt: number;
     updatedAt: number;
@@ -61,6 +68,33 @@ export interface PromptVariable {
 export interface CustomPromptSettings {
     prompts: CustomPrompt[];
 }
+
+export const DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS: CustomPrompt[] = [
+    {
+        id: 'xiaohongshu-format',
+        name: '小红书自动排版',
+        description: '按小红书风格生成 5 个标题候选、正文和话题标签',
+        prompt: '使用“小红书自动排版”内置流程。可在“小红书自动排版”设置里调整排版规则。',
+        outputMode: 'newFile',
+        category: 'xiaohongshu',
+        enabled: true,
+        automationAction: 'xiaohongshu-format',
+        createdAt: 0,
+        updatedAt: 0
+    },
+    {
+        id: 'xiaohongshu-format-publish',
+        name: '排版并发布草稿',
+        description: '先自动排版，再保存到小红书草稿箱',
+        prompt: '使用“小红书排版并发布草稿”内置流程。可在“小红书自动排版”设置里调整排版规则。',
+        outputMode: 'newFile',
+        category: 'xiaohongshu',
+        enabled: true,
+        automationAction: 'xiaohongshu-format-publish',
+        createdAt: 0,
+        updatedAt: 0
+    }
+];
 
 // Keyboard Shortcuts
 export interface ShortcutBinding {
@@ -94,9 +128,14 @@ export interface I18nSettings {
     language: 'auto' | 'zh-CN' | 'en';
 }
 
+export interface XiaohongshuFormattingSettings {
+    rules: string;
+}
+
 export interface WorkbenchSettings {
     api: ApiSettings;
     images: ImageGenerationSettings;
+    videos: VideoGenerationSettings;
     output: OutputSettings;
     backup: BackupSettings;
     claudian: ClaudianSettings;
@@ -105,6 +144,7 @@ export interface WorkbenchSettings {
     contextMenu: ContextMenuSettings;
     ui: UISettings;
     publishing: PublishingSettings;
+    xiaohongshuFormatting: XiaohongshuFormattingSettings;
     i18n: I18nSettings;
 }
 
@@ -192,6 +232,7 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         headers: {}
     },
     images: { ...DEFAULT_IMAGE_SETTINGS },
+    videos: { ...DEFAULT_VIDEO_SETTINGS },
     output: {
         summaryPosition: 'append',
         language: 'auto',
@@ -207,7 +248,7 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         showButton: true
     },
     customPrompts: {
-        prompts: []
+        prompts: DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS
     },
     shortcuts: {
         enabled: true,
@@ -228,6 +269,9 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         showTokenCount: false
     },
     publishing: DEFAULT_PUBLISHING_SETTINGS,
+    xiaohongshuFormatting: {
+        rules: DEFAULT_XIAOHONGSHU_FORMATTING_RULES
+    },
     i18n: {
         language: 'auto'
     }
