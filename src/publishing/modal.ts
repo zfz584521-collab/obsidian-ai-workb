@@ -32,6 +32,33 @@ function getPlatformLabel(platform: PublishingPlatform): string {
 const IMAGE_EXTENSIONS = new Set(['avif', 'bmp', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp']);
 const VIDEO_EXTENSIONS = new Set(['avi', 'm4v', 'mkv', 'mov', 'mp4', 'webm']);
 
+export interface PublishModalInitialContent {
+    video?: PublishMedia;
+}
+
+export function createVaultVideoMedia(path: string): PublishMedia {
+    const normalized = normalizeVaultPath(path);
+    const name = normalized.substring(normalized.lastIndexOf('/') + 1) || normalized;
+    return {
+        kind: 'video',
+        source: 'vault',
+        path: normalized,
+        name,
+        mimeType: mimeType(extensionFromPath(path))
+    };
+}
+
+export function applyInitialPublishContent(
+    content: PublishContent,
+    initialContent?: PublishModalInitialContent
+): PublishContent {
+    if (!initialContent?.video) return content;
+    return {
+        ...content,
+        video: initialContent.video
+    };
+}
+
 export class PublishModalState {
     constructor(
         public base: PublishContent,
@@ -595,6 +622,15 @@ function parseTags(value: string): string[] {
     return value.split(/[,，]/)
         .map(tag => tag.trim().replace(/^#/, ''))
         .filter(Boolean);
+}
+
+function normalizeVaultPath(path: string): string {
+    return path.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\.\//, '');
+}
+
+function extensionFromPath(path: string): string {
+    const match = path.split(/[?#]/, 1)[0].match(/\.([a-z0-9]+)$/i);
+    return match?.[1] || '';
 }
 
 function mimeType(extension: string): string | undefined {

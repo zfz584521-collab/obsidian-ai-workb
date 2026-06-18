@@ -84,6 +84,31 @@ test('uses a full provider task endpoint without appending the default path', as
     );
 });
 
+test('retries retryable video creation failures before giving up', async () => {
+    const { OpenAICompatibleVideoProvider } = await importTypeScript(entry);
+    const calls = [];
+    const delays = [];
+    const provider = new OpenAICompatibleVideoProvider(
+        settings({ retryCount: 2 }),
+        async (url) => {
+            calls.push(String(url));
+            if (calls.length === 1) {
+                return jsonResponse({ error: { message: 'rate limited' } }, 429);
+            }
+            return jsonResponse({
+                data: [{ b64_json: Buffer.from(mp4Bytes).toString('base64') }]
+            });
+        },
+        async ms => delays.push(ms)
+    );
+
+    const video = await provider.generate({ prompt: 'shot list', size: '1080x1920', duration: 5 });
+
+    assert.equal(video.mimeType, 'video/mp4');
+    assert.equal(calls.length, 2);
+    assert.deepEqual(delays, [1000]);
+});
+
 test('downloads secure URL videos and rejects non-local HTTP downloads', async () => {
     const { OpenAICompatibleVideoProvider } = await importTypeScript(entry);
     const fetchFn = async (url) => {

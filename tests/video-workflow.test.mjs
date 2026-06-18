@@ -107,6 +107,39 @@ test('uses selected script text when the editor has a selection', async () => {
     assert.equal(state.promptInput, '选中的短视频脚本');
 });
 
+test('prepares an editable prompt without requesting video generation', async () => {
+    const { VideoGenerationWorkflow } = await importTypeScript(entry);
+    const state = harness({ prompt: 'editable prompt draft' });
+    const workflow = new VideoGenerationWorkflow(
+        state.app, state.status, state.promptBuilder, settings(), state.providerFactory
+    );
+
+    const result = await workflow.preparePrompt();
+
+    assert.equal(result.success, true);
+    assert.equal(result.prompt, 'editable prompt draft');
+    assert.equal(result.file.path, file.path);
+    assert.equal(state.binaries.length, 0);
+    assert.equal(state.modified.length, 0);
+    assert.equal(state.providerRequest, undefined);
+});
+
+test('generates a video from a confirmed editable prompt', async () => {
+    const { VideoGenerationWorkflow } = await importTypeScript(entry);
+    const state = harness();
+    const workflow = new VideoGenerationWorkflow(
+        state.app, state.status, state.promptBuilder, settings(), state.providerFactory
+    );
+
+    const result = await workflow.runWithPrompt('confirmed prompt', file);
+
+    assert.equal(result.success, true);
+    assert.equal(state.promptInput, '');
+    assert.equal(state.providerRequest.prompt, 'confirmed prompt');
+    assert.equal(state.binaries[0].path, 'notes/script-assets/video-01.mp4');
+    assert.match(state.modified[0].content, /!\[\[script-assets\/video-01\.mp4\]\]/);
+});
+
 test('rejects missing settings before requesting a video', async () => {
     const { VideoGenerationWorkflow } = await importTypeScript(entry);
     const state = harness();

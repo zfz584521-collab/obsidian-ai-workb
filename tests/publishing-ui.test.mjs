@@ -62,6 +62,14 @@ test('publish modal supports unified content, platform overrides, and failed ret
     assert.match(styles, /\.ai-workbench-publish-result-row/);
 });
 
+test('publish modal can receive a generated vault video as initial content', () => {
+    assert.match(modalSource, /export interface PublishModalInitialContent/);
+    assert.match(modalSource, /export function createVaultVideoMedia/);
+    assert.match(modalSource, /export function applyInitialPublishContent/);
+    assert.match(modalSource, /video:\s*initialContent\.video/);
+    assert.match(modalSource, /mimeType\(extensionFromPath\(path\)\)/);
+});
+
 test('publish modal gives long text fields enough editing space', () => {
     assert.match(modalSource, /ai-workbench-publish-setting--body/);
     assert.match(styles, /\.ai-workbench-publish-setting--long/);
@@ -106,6 +114,14 @@ test('official publishing uses the Obsidian request transport', () => {
     assert.match(mainSource, /const obsidianFetch = createObsidianImageFetch\(requestUrl\)/);
     assert.match(mainSource, /new WebhookClient\(obsidianFetch\)/);
     assert.match(mainSource, /new PublishingAdapterFactory\(\s*new WebhookClient\(obsidianFetch\),\s*obsidianFetch\s*\)/s);
+});
+
+test('short video generation opens publishing with the generated mp4 for video-capable platforms', () => {
+    assert.match(mainSource, /createVaultVideoMedia/);
+    assert.match(mainSource, /getVideoPublishingPlatforms/);
+    assert.match(mainSource, /platform === 'youtube'/);
+    assert.match(mainSource, /settings\.connectionType === 'webhook'/);
+    assert.match(mainSource, /openPublishingModal\(platforms,\s*\{\s*video:\s*createVaultVideoMedia\(result\.outputPath\)\s*\}\)/s);
 });
 
 test('Xiaohongshu formatting exposes custom rules and two-step automation', () => {

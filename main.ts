@@ -53,7 +53,12 @@ import { ObsidianContentExtractor } from './src/publishing/obsidian-content';
 import { WebhookClient } from './src/publishing/webhook';
 import { PublishingAdapterFactory } from './src/publishing/adapters';
 import { PublishingService } from './src/publishing/service';
-import { PublishEditorModal } from './src/publishing/modal';
+import {
+    applyInitialPublishContent,
+    createVaultVideoMedia,
+    PublishEditorModal,
+    PublishModalInitialContent
+} from './src/publishing/modal';
 import {
     buildXiaohongshuFormattingPrompt,
     DEFAULT_XIAOHONGSHU_FORMATTING_RULES,
@@ -62,6 +67,12 @@ import {
 import { i18n, t } from './src/i18n';
 
 const VIEW_TYPE = 'ai-workbench-view';
+
+type ShortVideoWorkflowFile = {
+    path: string;
+    extension: string;
+    basename: string;
+};
 
 export default class AIWorkbenchPlugin extends Plugin {
     settings: WorkbenchSettings;
@@ -382,7 +393,10 @@ export default class AIWorkbenchPlugin extends Plugin {
         return this.publishingService;
     }
 
-    async openPublishingModal(platforms: PublishingPlatform[]): Promise<void> {
+    async openPublishingModal(
+        platforms: PublishingPlatform[],
+        initialContent?: PublishModalInitialContent
+    ): Promise<void> {
         const file = this.app.workspace.getActiveFile();
         if (!file || file.extension !== 'md') {
             new Notice('请先打开一篇 Markdown 笔记');
@@ -395,7 +409,10 @@ export default class AIWorkbenchPlugin extends Plugin {
             new Notice('所选平台尚未启用或配置完成');
             return;
         }
-        const content = await this.contentExtractor.extract(file);
+        const content = applyInitialPublishContent(
+            await this.contentExtractor.extract(file),
+            initialContent
+        );
         new PublishEditorModal(
             this.app,
             content,
@@ -538,6 +555,14 @@ export default class AIWorkbenchPlugin extends Plugin {
         return PUBLISHING_PLATFORMS.filter(platform =>
             this.isPublishingPlatformConfigured(platform)
         );
+    }
+
+    private getVideoPublishingPlatforms(): PublishingPlatform[] {
+        return this.getDefaultPublishingPlatforms()
+            .filter(platform => {
+                const settings = this.settings.publishing.platforms[platform];
+                return platform === 'youtube' || settings.connectionType === 'webhook';
+            });
     }
 
     /**
@@ -859,9 +884,40 @@ export default class AIWorkbenchPlugin extends Plugin {
 
         this.isProcessing = true;
         try {
-            const result = await this.videoGenerationWorkflow.run();
+            const prepared = await this.videoGenerationWorkflow.preparePrompt();
+            if (!prepared.success || !prepared.prompt || !prepared.file) {
+                new Notice(`短视频提示词生成失败：${prepared.error || '未知错误'}`);
+                return;
+            }
+            new ShortVideoPromptModal(
+                this.app,
+                prepared.prompt,
+                prompt => this.generateShortVideoFromPrompt(prompt, prepared.file)
+            ).open();
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async generateShortVideoFromPrompt(prompt: string, file?: ShortVideoWorkflowFile): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.videoGenerationWorkflow.runWithPrompt(prompt, file);
             if (result.success) {
                 new Notice(`短视频生成完成：${result.outputPath || ''}`);
+                if (result.outputPath) {
+                    const platforms = this.getVideoPublishingPlatforms();
+                    if (platforms.length > 0) {
+                        await this.openPublishingModal(platforms, {
+                            video: createVaultVideoMedia(result.outputPath)
+                        });
+                    }
+                }
             } else {
                 new Notice(`短视频生成失败：${result.error || '未知错误'}`);
             }
@@ -1465,6 +1521,56 @@ class WorkbenchView extends ItemView {
 /**
  * Simple instruction input modal
  */
+class ShortVideoPromptModal extends Modal {
+    constructor(
+        app: App,
+        private prompt: string,
+        private onConfirm: (prompt: string) => Promise<void>
+    ) {
+        super(app);
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.empty();
+        contentEl.addClass('ai-workbench-modal');
+        contentEl.createEl('h2', { text: '确认短视频提示词' });
+        contentEl.createEl('p', {
+            text: '先检查并编辑提示词，确认后才会调用视频模型。',
+            cls: 'setting-item-description'
+        });
+
+        const textarea = contentEl.createEl('textarea');
+        textarea.value = this.prompt;
+        textarea.rows = 14;
+        textarea.style.width = '100%';
+        textarea.style.minHeight = '260px';
+
+        const actions = contentEl.createDiv({ cls: 'modal-button-container' });
+        const cancel = actions.createEl('button', { text: '关闭' });
+        cancel.addEventListener('click', () => this.close());
+
+        const submit = actions.createEl('button', {
+            text: '生成视频',
+            cls: 'mod-cta'
+        });
+        submit.addEventListener('click', async () => {
+            const value = textarea.value.trim();
+            if (!value) {
+                new Notice('视频提示词不能为空');
+                return;
+            }
+            submit.disabled = true;
+            this.close();
+            await this.onConfirm(value);
+        });
+    }
+
+    onClose() {
+        this.contentEl.empty();
+    }
+}
+
 class InstructionModal extends Modal {
     private onSubmit: (instruction: string) => void;
     private instruction: string = '';

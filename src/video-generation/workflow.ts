@@ -40,6 +40,13 @@ export interface VideoWorkflowResult {
     error?: string;
 }
 
+export interface VideoPromptPreparationResult {
+    success: boolean;
+    file?: WorkflowFile;
+    prompt?: string;
+    error?: string;
+}
+
 type ProviderFactory = (settings: VideoGenerationSettings) => VideoProvider;
 
 function validateSettings(settings: VideoGenerationSettings): void {
@@ -144,25 +151,48 @@ export class VideoGenerationWorkflow {
     }
 
     async run(file?: WorkflowFile): Promise<VideoWorkflowResult> {
+        return this.runInternal(file);
+    }
+
+    async preparePrompt(file?: WorkflowFile): Promise<VideoPromptPreparationResult> {
         if (this.running) {
             return { success: false, error: '短视频生成任务正在运行' };
         }
         this.running = true;
 
         try {
-            const target = file || this.app.workspace.getActiveFile();
-            if (!target || target.extension !== 'md') {
-                throw new Error('请先打开一篇 Markdown 笔记');
-            }
-
-            validateSettings(this.settings);
-            const markdown = await this.app.vault.read(target);
-            const selected = this.getSelection(target);
-            const source = (selected || markdown).trim();
-            if (!source) throw new Error('短视频文案或脚本为空');
-
+            const { target, source } = await this.resolveSource(file);
             this.status.setProcessing('正在生成视频提示词');
             const prompt = await this.promptBuilder.build(source);
+            this.status.setCompleted();
+            return { success: true, file: target, prompt };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '视频提示词生成失败';
+            this.status.setError(message);
+            return { success: false, error: message };
+        } finally {
+            this.running = false;
+        }
+    }
+
+    async runWithPrompt(prompt: string, file?: WorkflowFile): Promise<VideoWorkflowResult> {
+        return this.runInternal(file, prompt);
+    }
+
+    private async runInternal(file?: WorkflowFile, confirmedPrompt?: string): Promise<VideoWorkflowResult> {
+        if (this.running) {
+            return { success: false, error: '短视频生成任务正在运行' };
+        }
+        this.running = true;
+
+        try {
+            const { target, markdown, source } = await this.resolveSource(file);
+            let prompt = confirmedPrompt?.trim();
+            if (!prompt) {
+                this.status.setProcessing('正在生成视频提示词');
+                prompt = await this.promptBuilder.build(source);
+            }
+            if (!prompt) throw new Error('视频提示词不能为空');
 
             this.status.setProgress('正在生成短视频', 0, 1);
             const video = await this.providerFactory(this.settings).generate({
@@ -197,6 +227,24 @@ export class VideoGenerationWorkflow {
         } finally {
             this.running = false;
         }
+    }
+
+    private async resolveSource(file?: WorkflowFile): Promise<{
+        target: WorkflowFile;
+        markdown: string;
+        source: string;
+    }> {
+        const target = file || this.app.workspace.getActiveFile();
+        if (!target || target.extension !== 'md') {
+            throw new Error('请先打开一篇 Markdown 笔记');
+        }
+
+        validateSettings(this.settings);
+        const markdown = await this.app.vault.read(target);
+        const selected = this.getSelection(target);
+        const source = (selected || markdown).trim();
+        if (!source) throw new Error('短视频文案或脚本为空');
+        return { target, markdown, source };
     }
 
     private getSelection(file: WorkflowFile): string | undefined {

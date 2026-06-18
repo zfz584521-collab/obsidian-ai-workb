@@ -79,6 +79,34 @@ test('retries retryable errors and attempts final errors once', async () => {
     assert.ok(results[2].image);
 });
 
+test('waits between retryable image generation attempts', async () => {
+    const { ImageGenerationCoordinator, ImageProviderError } =
+        await importTypeScript(entry);
+    let attempts = 0;
+    const delays = [];
+    const provider = {
+        async generate() {
+            attempts += 1;
+            if (attempts < 3) {
+                throw new ImageProviderError('rate limited', true, 429);
+            }
+            return image;
+        }
+    };
+    const coordinator = new ImageGenerationCoordinator(
+        provider,
+        1,
+        2,
+        async ms => delays.push(ms)
+    );
+
+    const [result] = await coordinator.generateAll([tasks[0]], 'size', () => {});
+
+    assert.ok(result.image);
+    assert.equal(attempts, 3);
+    assert.deepEqual(delays, [1000, 2000]);
+});
+
 test('clamps concurrency and sanitizes provider errors', async () => {
     const { ImageGenerationCoordinator, ImageProviderError } =
         await importTypeScript(entry);

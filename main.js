@@ -4763,8 +4763,9 @@ function sanitizeError(error) {
   return message.split(/\r?\n/, 1)[0].replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]").replace(/\bsk-[A-Za-z0-9_-]+\b/g, "[REDACTED]").slice(0, 160);
 }
 var ImageGenerationCoordinator = class {
-  constructor(provider, concurrency, retryCount) {
+  constructor(provider, concurrency, retryCount, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
     this.provider = provider;
+    this.sleep = sleep;
     this.workerCount = Math.max(1, Math.min(5, Math.floor(concurrency) || 1));
     this.retries = Math.max(0, Math.floor(retryCount) || 0);
   }
@@ -4805,6 +4806,7 @@ var ImageGenerationCoordinator = class {
         const retryable = error instanceof ImageProviderError && error.retryable;
         if (!retryable || attempt === this.retries)
           throw error;
+        await this.sleep(1e3 * Math.pow(2, attempt));
       }
     }
     throw new Error("\u56FE\u7247\u751F\u6210\u5931\u8D25");
@@ -5311,6 +5313,9 @@ function resolveGenerationUrl(endpoint) {
   }
   return `${url}/videos/generations`;
 }
+function retryDelay(attempt) {
+  return 1e3 * Math.pow(2, attempt);
+}
 var OpenAICompatibleVideoProvider = class {
   constructor(settings, fetchFn = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
     this.settings = settings;
@@ -5326,24 +5331,7 @@ var OpenAICompatibleVideoProvider = class {
       this.settings.timeout * 1e3
     );
     try {
-      const response = await this.fetchFn(generationUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${this.settings.apiKey}`
-        },
-        body: JSON.stringify({
-          model: this.settings.model,
-          prompt: request.prompt,
-          size: request.size,
-          duration: request.duration,
-          response_format: "b64_json"
-        }),
-        signal: controller.signal
-      });
-      if (!response.ok)
-        throw requestError2(response.status);
-      const data = await this.readJson(response);
+      const data = await this.createGenerationTask(generationUrl, request, controller.signal);
       return await this.resolveResult(generationUrl, data, controller.signal);
     } catch (error) {
       if (error instanceof VideoProviderError)
@@ -5354,6 +5342,37 @@ var OpenAICompatibleVideoProvider = class {
       throw new VideoProviderError("\u89C6\u9891\u670D\u52A1\u7F51\u7EDC\u8BF7\u6C42\u5931\u8D25", true);
     } finally {
       clearTimeout(timeoutId);
+    }
+  }
+  async createGenerationTask(generationUrl, request, signal) {
+    const maxRetries = Math.max(0, this.settings.retryCount);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await this.fetchFn(generationUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${this.settings.apiKey}`
+          },
+          body: JSON.stringify({
+            model: this.settings.model,
+            prompt: request.prompt,
+            size: request.size,
+            duration: request.duration,
+            response_format: "b64_json"
+          }),
+          signal
+        });
+        if (!response.ok)
+          throw requestError2(response.status);
+        return await this.readJson(response);
+      } catch (error) {
+        if (!(error instanceof VideoProviderError))
+          throw error;
+        if (!error.retryable || attempt >= maxRetries)
+          throw error;
+        await this.sleep(retryDelay(attempt));
+      }
     }
   }
   async resolveResult(generationUrl, data, signal) {
@@ -5500,24 +5519,45 @@ var VideoGenerationWorkflow = class {
     this.settings = { ...settings };
   }
   async run(file) {
+    return this.runInternal(file);
+  }
+  async preparePrompt(file) {
+    if (this.running) {
+      return { success: false, error: "\u77ED\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
+    }
+    this.running = true;
+    try {
+      const { target, source } = await this.resolveSource(file);
+      this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
+      const prompt = await this.promptBuilder.build(source);
+      this.status.setCompleted();
+      return { success: true, file: target, prompt };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25";
+      this.status.setError(message);
+      return { success: false, error: message };
+    } finally {
+      this.running = false;
+    }
+  }
+  async runWithPrompt(prompt, file) {
+    return this.runInternal(file, prompt);
+  }
+  async runInternal(file, confirmedPrompt) {
     var _a, _b;
     if (this.running) {
       return { success: false, error: "\u77ED\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
     }
     this.running = true;
     try {
-      const target = file || this.app.workspace.getActiveFile();
-      if (!target || target.extension !== "md") {
-        throw new Error("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
+      const { target, markdown, source } = await this.resolveSource(file);
+      let prompt = confirmedPrompt == null ? void 0 : confirmedPrompt.trim();
+      if (!prompt) {
+        this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
+        prompt = await this.promptBuilder.build(source);
       }
-      validateSettings2(this.settings);
-      const markdown = await this.app.vault.read(target);
-      const selected = this.getSelection(target);
-      const source = (selected || markdown).trim();
-      if (!source)
-        throw new Error("\u77ED\u89C6\u9891\u6587\u6848\u6216\u811A\u672C\u4E3A\u7A7A");
-      this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
-      const prompt = await this.promptBuilder.build(source);
+      if (!prompt)
+        throw new Error("\u89C6\u9891\u63D0\u793A\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
       this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891", 0, 1);
       const video = await this.providerFactory(this.settings).generate({
         prompt,
@@ -5554,6 +5594,19 @@ var VideoGenerationWorkflow = class {
     } finally {
       this.running = false;
     }
+  }
+  async resolveSource(file) {
+    const target = file || this.app.workspace.getActiveFile();
+    if (!target || target.extension !== "md") {
+      throw new Error("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
+    }
+    validateSettings2(this.settings);
+    const markdown = await this.app.vault.read(target);
+    const selected = this.getSelection(target);
+    const source = (selected || markdown).trim();
+    if (!source)
+      throw new Error("\u77ED\u89C6\u9891\u6587\u6848\u6216\u811A\u672C\u4E3A\u7A7A");
+    return { target, markdown, source };
   }
   getSelection(file) {
     var _a, _b;
@@ -7122,6 +7175,25 @@ function getPlatformLabel2(platform) {
 }
 var IMAGE_EXTENSIONS2 = /* @__PURE__ */ new Set(["avif", "bmp", "gif", "jpeg", "jpg", "png", "svg", "webp"]);
 var VIDEO_EXTENSIONS2 = /* @__PURE__ */ new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm"]);
+function createVaultVideoMedia(path) {
+  const normalized = normalizeVaultPath(path);
+  const name = normalized.substring(normalized.lastIndexOf("/") + 1) || normalized;
+  return {
+    kind: "video",
+    source: "vault",
+    path: normalized,
+    name,
+    mimeType: mimeType(extensionFromPath(path))
+  };
+}
+function applyInitialPublishContent(content, initialContent) {
+  if (!(initialContent == null ? void 0 : initialContent.video))
+    return content;
+  return {
+    ...content,
+    video: initialContent.video
+  };
+}
 var PublishModalState = class {
   constructor(base, platforms, overrides = {}) {
     this.base = base;
@@ -7562,6 +7634,13 @@ function cloneContent(content) {
 function parseTags(value) {
   return value.split(/[,，]/).map((tag) => tag.trim().replace(/^#/, "")).filter(Boolean);
 }
+function normalizeVaultPath(path) {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\.\//, "");
+}
+function extensionFromPath(path) {
+  const match = path.split(/[?#]/, 1)[0].match(/\.([a-z0-9]+)$/i);
+  return (match == null ? void 0 : match[1]) || "";
+}
 function mimeType(extension) {
   const normalized = extension.toLowerCase();
   if (normalized === "jpg" || normalized === "jpeg")
@@ -7844,7 +7923,7 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
   getPublishingService() {
     return this.publishingService;
   }
-  async openPublishingModal(platforms) {
+  async openPublishingModal(platforms, initialContent) {
     const file = this.app.workspace.getActiveFile();
     if (!file || file.extension !== "md") {
       new import_obsidian14.Notice("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
@@ -7857,7 +7936,10 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       new import_obsidian14.Notice("\u6240\u9009\u5E73\u53F0\u5C1A\u672A\u542F\u7528\u6216\u914D\u7F6E\u5B8C\u6210");
       return;
     }
-    const content = await this.contentExtractor.extract(file);
+    const content = applyInitialPublishContent(
+      await this.contentExtractor.extract(file),
+      initialContent
+    );
     new PublishEditorModal(
       this.app,
       content,
@@ -7989,6 +8071,12 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     return PUBLISHING_PLATFORMS.filter(
       (platform) => this.isPublishingPlatformConfigured(platform)
     );
+  }
+  getVideoPublishingPlatforms() {
+    return this.getDefaultPublishingPlatforms().filter((platform) => {
+      const settings = this.settings.publishing.platforms[platform];
+      return platform === "youtube" || settings.connectionType === "webhook";
+    });
   }
   /**
    * Show statistics modal
@@ -8274,9 +8362,38 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     }
     this.isProcessing = true;
     try {
-      const result = await this.videoGenerationWorkflow.run();
+      const prepared = await this.videoGenerationWorkflow.preparePrompt();
+      if (!prepared.success || !prepared.prompt || !prepared.file) {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25\uFF1A${prepared.error || "\u672A\u77E5\u9519\u8BEF"}`);
+        return;
+      }
+      new ShortVideoPromptModal(
+        this.app,
+        prepared.prompt,
+        (prompt) => this.generateShortVideoFromPrompt(prompt, prepared.file)
+      ).open();
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async generateShortVideoFromPrompt(prompt, file) {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.videoGenerationWorkflow.runWithPrompt(prompt, file);
       if (result.success) {
         new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5B8C\u6210\uFF1A${result.outputPath || ""}`);
+        if (result.outputPath) {
+          const platforms = this.getVideoPublishingPlatforms();
+          if (platforms.length > 0) {
+            await this.openPublishingModal(platforms, {
+              video: createVaultVideoMedia(result.outputPath)
+            });
+          }
+        }
       } else {
         new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
       }
@@ -8781,6 +8898,48 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
     modal.open();
   }
   async onClose() {
+  }
+};
+var ShortVideoPromptModal = class extends import_obsidian14.Modal {
+  constructor(app, prompt, onConfirm) {
+    super(app);
+    this.prompt = prompt;
+    this.onConfirm = onConfirm;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass("ai-workbench-modal");
+    contentEl.createEl("h2", { text: "\u786E\u8BA4\u77ED\u89C6\u9891\u63D0\u793A\u8BCD" });
+    contentEl.createEl("p", {
+      text: "\u5148\u68C0\u67E5\u5E76\u7F16\u8F91\u63D0\u793A\u8BCD\uFF0C\u786E\u8BA4\u540E\u624D\u4F1A\u8C03\u7528\u89C6\u9891\u6A21\u578B\u3002",
+      cls: "setting-item-description"
+    });
+    const textarea = contentEl.createEl("textarea");
+    textarea.value = this.prompt;
+    textarea.rows = 14;
+    textarea.style.width = "100%";
+    textarea.style.minHeight = "260px";
+    const actions = contentEl.createDiv({ cls: "modal-button-container" });
+    const cancel = actions.createEl("button", { text: "\u5173\u95ED" });
+    cancel.addEventListener("click", () => this.close());
+    const submit = actions.createEl("button", {
+      text: "\u751F\u6210\u89C6\u9891",
+      cls: "mod-cta"
+    });
+    submit.addEventListener("click", async () => {
+      const value = textarea.value.trim();
+      if (!value) {
+        new import_obsidian14.Notice("\u89C6\u9891\u63D0\u793A\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
+        return;
+      }
+      submit.disabled = true;
+      this.close();
+      await this.onConfirm(value);
+    });
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 var InstructionModal = class extends import_obsidian14.Modal {

@@ -40,18 +40,22 @@ data.json
 backups/
 stats.json
 .superpowers/
+.claude/
 .edge-xhs-profile/
 .xhs-upload-cache/
 
 # Release packages
 *.zip
 !ai-workbench-v0.1.1.zip
+!ai-workbench-v0.1.2.zip
 !release/
 release/*
 !release/main.js
 !release/manifest.json
 !release/styles.css
 !release/README.md
+!release/scripts/
+!release/scripts/xhs-draft-server.mjs
 
 # Temporary files
 *.tmp

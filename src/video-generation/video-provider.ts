@@ -124,6 +124,10 @@ function resolveGenerationUrl(endpoint: URL): string {
     return `${url}/videos/generations`;
 }
 
+function retryDelay(attempt: number): number {
+    return 1000 * Math.pow(2, attempt);
+}
+
 export class OpenAICompatibleVideoProvider implements VideoProvider {
     constructor(
         private settings: VideoGenerationSettings,
@@ -142,24 +146,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
         );
 
         try {
-            const response = await this.fetchFn(generationUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.settings.apiKey}`
-                },
-                body: JSON.stringify({
-                    model: this.settings.model,
-                    prompt: request.prompt,
-                    size: request.size,
-                    duration: request.duration,
-                    response_format: 'b64_json'
-                }),
-                signal: controller.signal
-            });
-
-            if (!response.ok) throw requestError(response.status);
-            const data = await this.readJson(response);
+            const data = await this.createGenerationTask(generationUrl, request, controller.signal);
             return await this.resolveResult(generationUrl, data, controller.signal);
         } catch (error) {
             if (error instanceof VideoProviderError) throw error;
@@ -169,6 +156,40 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
             throw new VideoProviderError('视频服务网络请求失败', true);
         } finally {
             clearTimeout(timeoutId);
+        }
+    }
+
+    private async createGenerationTask(
+        generationUrl: string,
+        request: VideoGenerationRequest,
+        signal: AbortSignal
+    ): Promise<any> {
+        const maxRetries = Math.max(0, this.settings.retryCount);
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                const response = await this.fetchFn(generationUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${this.settings.apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: this.settings.model,
+                        prompt: request.prompt,
+                        size: request.size,
+                        duration: request.duration,
+                        response_format: 'b64_json'
+                    }),
+                    signal
+                });
+
+                if (!response.ok) throw requestError(response.status);
+                return await this.readJson(response);
+            } catch (error) {
+                if (!(error instanceof VideoProviderError)) throw error;
+                if (!error.retryable || attempt >= maxRetries) throw error;
+                await this.sleep(retryDelay(attempt));
+            }
         }
     }
 

@@ -23,7 +23,9 @@ export class ImageGenerationCoordinator {
     constructor(
         private provider: ImageProvider,
         concurrency: number,
-        retryCount: number
+        retryCount: number,
+        private sleep: (ms: number) => Promise<void> =
+            ms => new Promise(resolve => setTimeout(resolve, ms))
     ) {
         this.workerCount = Math.max(1, Math.min(5, Math.floor(concurrency) || 1));
         this.retries = Math.max(0, Math.floor(retryCount) || 0);
@@ -73,6 +75,7 @@ export class ImageGenerationCoordinator {
             } catch (error) {
                 const retryable = error instanceof ImageProviderError && error.retryable;
                 if (!retryable || attempt === this.retries) throw error;
+                await this.sleep(1000 * Math.pow(2, attempt));
             }
         }
         throw new Error('图片生成失败');

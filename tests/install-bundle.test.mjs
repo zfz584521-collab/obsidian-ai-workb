@@ -13,7 +13,7 @@ test('installable bundle files include core, publishing, xiaohongshu, and video 
 
     assert.equal(parsedManifest.id, 'ai-workbench');
     assert.equal(parsedManifest.name, 'AI Workbench');
-    assert.equal(parsedManifest.version, '0.1.1');
+    assert.equal(parsedManifest.version, '0.1.2');
     assert.ok(styles.size > 10000);
     for (const marker of [
         'summarize',

@@ -38,3 +38,10 @@ test('registers and exposes the one-click short video generation command', () =>
     assert.match(mainSource, /new VideoGenerationWorkflow\(/);
     assert.match(mainSource, /ai-workbench-generate-video/);
 });
+
+test('short video command previews an editable prompt before creating the video', () => {
+    assert.match(mainSource, /preparePrompt\(\)/);
+    assert.match(mainSource, /ShortVideoPromptModal/);
+    assert.match(mainSource, /runWithPrompt\(prompt,\s*file\)/);
+    assert.match(mainSource, /生成视频/);
+});

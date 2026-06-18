@@ -1,7 +1,7 @@
 {
   "id": "ai-workbench",
   "name": "AI Workbench",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.4.0",
   "description": "AI 驱动的 Obsidian 笔记工作台，一键完成总结、翻译、思维导图等操作",
   "author": "zfz584521-collab",

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-18
+
+### Added
+
+- Added an editable short-video prompt confirmation step before calling the video model.
+- Added automatic draft-publishing handoff after video generation, preselecting the generated MP4 for YouTube and webhook video platforms.
+- Added retry/backoff handling for retryable image and video generation failures to reduce transient 429 failures.
+
+### Changed
+
+- Updated the packaged release artifacts so a fresh install includes the latest publishing, image, and video workflows.
+- Included the Xiaohongshu draft relay helper in the release package.
+
+### Fixed
+
+- Fixed generated videos not being carried into the publishing modal.
+- Fixed retryable video creation failures failing immediately instead of honoring retry settings.
+- Fixed retryable image generation failures retrying immediately without waiting.
+
 ### Multi-platform publishing
 
 - Added draft publishing for WeChat Official Account, Xiaohongshu, WeChat Channels, Douyin, X, and YouTube.
