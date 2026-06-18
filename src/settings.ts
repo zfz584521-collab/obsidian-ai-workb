@@ -667,16 +667,12 @@ export class WorkbenchSettingTab extends PluginSettingTab {
                 });
             });
 
-            if (!prompt.automationAction) {
-                actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
-                    btn.addEventListener('click', async () => {
-                        this.plugin.getCustomPromptsService().delete(prompt.id);
-                        await this.plugin.saveSettings();
-                        this.plugin.refreshCustomPromptCommands();
-                        this.display();
-                    });
+            actions.createEl('button', { text: t('common.delete'), cls: 'mod-warning' }, btn => {
+                btn.addEventListener('click', async () => {
+                    await this.plugin.deleteCustomPrompt(prompt.id);
+                    this.display();
                 });
-            }
+            });
         }
     }
 

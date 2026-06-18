@@ -39,13 +39,18 @@ export function getDefaultSidebarPrompts(): CustomPrompt[] {
     ];
 }
 
-export function withDefaultSidebarPrompts(prompts: CustomPrompt[] = []): CustomPrompt[] {
+export function withDefaultSidebarPrompts(
+    prompts: CustomPrompt[] = [],
+    deletedDefaultPromptIds: string[] = []
+): CustomPrompt[] {
+    const deleted = new Set(deletedDefaultPromptIds);
     const merged = prompts.map(prompt => ({
         ...prompt,
         enabled: prompt.enabled !== false
     }));
 
     for (const defaultPrompt of getDefaultSidebarPrompts()) {
+        if (deleted.has(defaultPrompt.id)) continue;
         const exists = merged.some(prompt =>
             prompt.id === defaultPrompt.id
             || (

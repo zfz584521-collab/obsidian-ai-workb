@@ -23,7 +23,7 @@ import { BackupManager } from './src/services/backup-manager';
 import { FileService } from './src/services/file';
 import { ClaudianService } from './src/services/claudian';
 import { CustomPromptsService } from './src/services/custom-prompts';
-import { withDefaultSidebarPrompts } from './src/services/default-custom-prompts';
+import { getDefaultSidebarPrompts, withDefaultSidebarPrompts } from './src/services/default-custom-prompts';
 import { ShortcutsService } from './src/services/shortcuts';
 import { ContextMenuService } from './src/services/context-menu';
 import { StatusBarService } from './src/services/status-bar';
@@ -159,7 +159,9 @@ export default class AIWorkbenchPlugin extends Plugin {
             new AIShortVideoPromptBuilder(this.aiService),
             this.settings.videos,
             value => new OpenAICompatibleVideoProvider(value, obsidianFetch),
-            MarkdownView
+            MarkdownView,
+            this.settings.images,
+            value => new OpenAICompatibleImageProvider(value, obsidianFetch)
         );
 
         // Context menu
@@ -209,8 +211,18 @@ export default class AIWorkbenchPlugin extends Plugin {
             callback: () => this.executeWeChatImageInsertion()
         });
         this.addCommand({
+            id: 'prepare-short-video-prompt',
+            name: '生成短视频提示词',
+            callback: () => this.executeShortVideoPromptGeneration()
+        });
+        this.addCommand({
+            id: 'generate-short-video-image',
+            name: '生成短视频图片',
+            callback: () => this.executeShortVideoImageGeneration()
+        });
+        this.addCommand({
             id: 'generate-short-video',
-            name: '一键生成短视频',
+            name: '生成短视频',
             callback: () => this.executeShortVideoGeneration()
         });
 
@@ -314,7 +326,11 @@ export default class AIWorkbenchPlugin extends Plugin {
             },
             i18n: { ...DEFAULT_SETTINGS.i18n, ...saved?.i18n }
         };
-        this.settings.customPrompts.prompts = withDefaultSidebarPrompts(this.settings.customPrompts.prompts);
+        this.settings.customPrompts.deletedDefaultPromptIds = saved?.customPrompts?.deletedDefaultPromptIds || [];
+        this.settings.customPrompts.prompts = withDefaultSidebarPrompts(
+            this.settings.customPrompts.prompts,
+            this.settings.customPrompts.deletedDefaultPromptIds
+        );
     }
 
     async saveSettings() {
@@ -331,6 +347,7 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
         this.weChatImageWorkflow.updateSettings(this.settings.images);
         this.videoGenerationWorkflow?.updateSettings(this.settings.videos);
+        this.videoGenerationWorkflow?.updateImageSettings(this.settings.images);
         this.publishingService?.updateSettings(this.settings.publishing);
         this.refreshWorkbenchViews();
     }
@@ -348,6 +365,18 @@ export default class AIWorkbenchPlugin extends Plugin {
      */
     getCustomPromptsService(): CustomPromptsService {
         return this.customPromptsService;
+    }
+
+    async deleteCustomPrompt(promptId: string): Promise<void> {
+        const defaultIds = new Set(getDefaultSidebarPrompts().map(prompt => prompt.id));
+        if (defaultIds.has(promptId)) {
+            const deleted = new Set(this.settings.customPrompts.deletedDefaultPromptIds || []);
+            deleted.add(promptId);
+            this.settings.customPrompts.deletedDefaultPromptIds = [...deleted];
+        }
+        this.customPromptsService.delete(promptId);
+        await this.saveSettings();
+        this.refreshCustomPromptCommands();
     }
 
     getShortcutsService(): ShortcutsService {
@@ -576,6 +605,10 @@ export default class AIWorkbenchPlugin extends Plugin {
         this.shortcutsService.registerAll((actionId, customPromptId) => {
             if (actionId === 'wechat-insert-images') {
                 this.executeWeChatImageInsertion();
+            } else if (actionId === 'prepare-short-video-prompt') {
+                this.executeShortVideoPromptGeneration();
+            } else if (actionId === 'generate-short-video-image') {
+                this.executeShortVideoImageGeneration();
             } else if (actionId === 'generate-short-video') {
                 this.executeShortVideoGeneration();
             } else if (actionId === 'custom' && customPromptId) {
@@ -861,6 +894,86 @@ export default class AIWorkbenchPlugin extends Plugin {
         }
     }
 
+    async executeShortVideoPromptGeneration(): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.videoGenerationWorkflow.run();
+            await this.handleGeneratedShortVideo(result);
+            return;
+            const prepared = await this.videoGenerationWorkflow.preparePrompt();
+            if (!prepared.success || !prepared.prompt || !prepared.file) {
+                new Notice(`短视频提示词生成失败：${prepared.error || '未知错误'}`);
+                return;
+            }
+            new ShortVideoPromptModal(
+                this.app,
+                prepared.prompt,
+                prompt => this.writeShortVideoPrompt(prompt, prepared.file)
+            ).open();
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    async executeShortVideoImageGeneration(file?: ShortVideoWorkflowFile): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.videoGenerationWorkflow.generateImage(file);
+            if (result.success) {
+                new Notice(`短视频图片生成完成：${result.outputPath || ''}`);
+            } else {
+                new Notice(`短视频图片生成失败：${result.error || '未知错误'}`);
+            }
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async writeShortVideoPrompt(prompt: string, file?: ShortVideoWorkflowFile): Promise<void> {
+        if (this.isProcessing) {
+            new Notice('正在处理中，请稍候...');
+            return;
+        }
+
+        this.isProcessing = true;
+        try {
+            const result = await this.videoGenerationWorkflow.writePrompt(prompt, file);
+            if (result.success) {
+                new Notice('短视频提示词已写入当前笔记');
+            } else {
+                new Notice(`短视频提示词写入失败：${result.error || '未知错误'}`);
+            }
+        } finally {
+            this.isProcessing = false;
+        }
+    }
+
+    private async handleGeneratedShortVideo(result: { success: boolean; outputPath?: string; error?: string }): Promise<void> {
+        if (result.success) {
+            new Notice(`短视频生成完成：${result.outputPath || ''}`);
+            if (result.outputPath) {
+                const platforms = this.getVideoPublishingPlatforms();
+                if (platforms.length > 0) {
+                    await this.openPublishingModal(platforms, {
+                        video: createVaultVideoMedia(result.outputPath)
+                    });
+                }
+            }
+        } else {
+            new Notice(`短视频生成失败：${result.error || '未知错误'}`);
+        }
+    }
+
     async executeShortVideoGeneration(): Promise<void> {
         if (this.isProcessing) {
             new Notice('正在处理中，请稍候...');
@@ -869,6 +982,9 @@ export default class AIWorkbenchPlugin extends Plugin {
 
         this.isProcessing = true;
         try {
+            const directResult = await this.videoGenerationWorkflow.run();
+            await this.handleGeneratedShortVideo(directResult);
+            return;
             const prepared = await this.videoGenerationWorkflow.preparePrompt();
             if (!prepared.success || !prepared.prompt || !prepared.file) {
                 new Notice(`短视频提示词生成失败：${prepared.error || '未知错误'}`);
@@ -1199,7 +1315,7 @@ class WorkbenchView extends ItemView {
                     cls: 'category-title'
                 });
                 header.createEl('span', {
-                    text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 1 : 0)),
+                    text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 3 : 0)),
                     cls: 'category-count'
                 });
 
@@ -1226,6 +1342,20 @@ class WorkbenchView extends ItemView {
                 }
 
                 if (isVideoCategory) {
+                    const promptButton = buttonsContainer.createEl('button', {
+                        cls: 'ai-workbench-action-btn custom ai-workbench-generate-video-prompt',
+                        text: '生成视频提示词'
+                    });
+                    promptButton.addEventListener('click', () => {
+                        this.plugin.executeShortVideoPromptGeneration();
+                    });
+                    const imageButton = buttonsContainer.createEl('button', {
+                        cls: 'ai-workbench-action-btn custom ai-workbench-generate-video-image',
+                        text: '生成视频图片'
+                    });
+                    imageButton.addEventListener('click', () => {
+                        this.plugin.executeShortVideoImageGeneration();
+                    });
                     const videoButton = buttonsContainer.createEl('button', {
                         cls: 'ai-workbench-action-btn custom ai-workbench-generate-video',
                         text: '一键生成短视频'
@@ -1261,8 +1391,22 @@ class WorkbenchView extends ItemView {
             });
             const header = categoryContainer.createDiv({ cls: 'ai-workbench-category-header' });
             header.createEl('span', { text: '📱 短视频', cls: 'category-title' });
-            header.createEl('span', { text: '1', cls: 'category-count' });
+            header.createEl('span', { text: '3', cls: 'category-count' });
             const videoButtons = categoryContainer.createDiv({ cls: 'ai-workbench-buttons' });
+            const promptButton = videoButtons.createEl('button', {
+                cls: 'ai-workbench-action-btn custom ai-workbench-generate-video-prompt',
+                text: '生成视频提示词'
+            });
+            promptButton.addEventListener('click', () => {
+                this.plugin.executeShortVideoPromptGeneration();
+            });
+            const imageButton = videoButtons.createEl('button', {
+                cls: 'ai-workbench-action-btn custom ai-workbench-generate-video-image',
+                text: '生成视频图片'
+            });
+            imageButton.addEventListener('click', () => {
+                this.plugin.executeShortVideoImageGeneration();
+            });
             const videoButton = videoButtons.createEl('button', {
                 cls: 'ai-workbench-action-btn custom ai-workbench-generate-video',
                 text: '一键生成短视频'

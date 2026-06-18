@@ -67,6 +67,7 @@ export interface PromptVariable {
 
 export interface CustomPromptSettings {
     prompts: CustomPrompt[];
+    deletedDefaultPromptIds?: string[];
 }
 
 export const DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS: CustomPrompt[] = [

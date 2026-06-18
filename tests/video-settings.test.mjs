@@ -32,16 +32,23 @@ test('renders every required video setting control', () => {
     assert.match(settingsSource, /videoApiEndpoint/);
 });
 
-test('registers and exposes the one-click short video generation command', () => {
+test('registers and exposes the split short video generation commands', () => {
+    assert.match(mainSource, /id:\s*['"]prepare-short-video-prompt['"]/);
+    assert.match(mainSource, /id:\s*['"]generate-short-video-image['"]/);
     assert.match(mainSource, /id:\s*['"]generate-short-video['"]/);
+    assert.match(mainSource, /executeShortVideoPromptGeneration\(\)/);
+    assert.match(mainSource, /executeShortVideoImageGeneration\(\)/);
     assert.match(mainSource, /executeShortVideoGeneration\(\)/);
     assert.match(mainSource, /new VideoGenerationWorkflow\(/);
+    assert.match(mainSource, /ai-workbench-generate-video-prompt/);
+    assert.match(mainSource, /ai-workbench-generate-video-image/);
     assert.match(mainSource, /ai-workbench-generate-video/);
 });
 
-test('short video command previews an editable prompt before creating the video', () => {
+test('short video prompt command writes an editable prompt before media generation', () => {
     assert.match(mainSource, /preparePrompt\(\)/);
     assert.match(mainSource, /ShortVideoPromptModal/);
+    assert.match(mainSource, /writePrompt\(prompt,\s*file\)/);
     assert.match(mainSource, /runWithPrompt\(prompt,\s*file\)/);
     assert.match(mainSource, /生成视频/);
 });

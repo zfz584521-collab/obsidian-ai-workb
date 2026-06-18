@@ -2730,12 +2730,15 @@ function getDefaultSidebarPrompts() {
     ...DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS.map((prompt) => ({ ...prompt, enabled: true }))
   ];
 }
-function withDefaultSidebarPrompts(prompts = []) {
+function withDefaultSidebarPrompts(prompts = [], deletedDefaultPromptIds = []) {
+  const deleted = new Set(deletedDefaultPromptIds);
   const merged = prompts.map((prompt) => ({
     ...prompt,
     enabled: prompt.enabled !== false
   }));
   for (const defaultPrompt of getDefaultSidebarPrompts()) {
+    if (deleted.has(defaultPrompt.id))
+      continue;
     const exists = merged.some(
       (prompt) => prompt.id === defaultPrompt.id || Boolean(prompt.automationAction) && prompt.automationAction === defaultPrompt.automationAction || prompt.category === defaultPrompt.category && prompt.name === defaultPrompt.name
     );
@@ -4246,16 +4249,12 @@ var WorkbenchSettingTab = class extends import_obsidian10.PluginSettingTab {
           modal.open();
         });
       });
-      if (!prompt.automationAction) {
-        actions.createEl("button", { text: t("common.delete"), cls: "mod-warning" }, (btn) => {
-          btn.addEventListener("click", async () => {
-            this.plugin.getCustomPromptsService().delete(prompt.id);
-            await this.plugin.saveSettings();
-            this.plugin.refreshCustomPromptCommands();
-            this.display();
-          });
+      actions.createEl("button", { text: t("common.delete"), cls: "mod-warning" }, (btn) => {
+        btn.addEventListener("click", async () => {
+          await this.plugin.deleteCustomPrompt(prompt.id);
+          this.display();
         });
-      }
+      });
     }
   }
   renderShortcuts(container) {
@@ -5474,6 +5473,9 @@ var OpenAICompatibleVideoProvider = class {
 };
 
 // src/video-generation/workflow.ts
+var VIDEO_PROMPT_HEADING = "AI \u77ED\u89C6\u9891\u63D0\u793A\u8BCD";
+var VIDEO_IMAGE_HEADING = "AI \u77ED\u89C6\u9891\u53C2\u8003\u56FE";
+var VIDEO_OUTPUT_HEADING = "AI \u751F\u6210\u77ED\u89C6\u9891";
 function validateSettings2(settings) {
   let url;
   try {
@@ -5494,6 +5496,27 @@ function validateSettings2(settings) {
   if (settings.duration < 1 || settings.duration > 60) {
     throw new Error("\u89C6\u9891\u65F6\u957F\u5FC5\u987B\u5728 1 \u5230 60 \u79D2\u4E4B\u95F4");
   }
+}
+function validateImageSettings(settings) {
+  if (!settings)
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247\u751F\u6210\u6A21\u578B");
+  let url;
+  try {
+    url = new URL(settings.endpoint);
+  } catch (e) {
+    throw new Error("\u56FE\u7247 API \u5730\u5740\u683C\u5F0F\u65E0\u6548");
+  }
+  const localhost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && localhost)) {
+    throw new Error("\u56FE\u7247 API \u5FC5\u987B\u4F7F\u7528 HTTPS\uFF0C\u672C\u5730\u670D\u52A1\u9664\u5916");
+  }
+  if (!settings.apiKey.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247 API Key");
+  if (!settings.model.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247\u6A21\u578B");
+  if (!settings.size.trim())
+    throw new Error("\u8BF7\u5148\u914D\u7F6E\u56FE\u7247\u5C3A\u5BF8");
+  return settings;
 }
 function exactArrayBuffer2(bytes) {
   return bytes.buffer.slice(
@@ -5518,18 +5541,34 @@ function relativeEmbedPath(filePath, assetPath) {
   const { parent } = splitPath(filePath);
   return parent && assetPath.startsWith(`${parent}/`) ? assetPath.slice(parent.length + 1) : assetPath;
 }
-async function resolveVideoPath(file, exists, extension = "mp4") {
+async function resolveAssetPath(file, exists, filenamePrefix, extension) {
   const { parent, basename } = splitPath(file.path);
   const assetDirPath = joinPath2(parent, `${basename}-assets`);
   for (let counter = 1; counter <= 100; counter++) {
-    const videoPath = joinPath2(
+    const assetPath = joinPath2(
       assetDirPath,
-      `video-${String(counter).padStart(2, "0")}.${extension}`
+      `${filenamePrefix}-${String(counter).padStart(2, "0")}.${extension}`
     );
-    if (!await exists(videoPath))
-      return { assetDirPath, videoPath };
+    if (!await exists(assetPath))
+      return { assetDirPath, assetPath };
   }
-  throw new Error("\u65E0\u6CD5\u521B\u5EFA\u89C6\u9891\u6587\u4EF6\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A");
+  throw new Error("\u65E0\u6CD5\u521B\u5EFA\u6587\u4EF6\uFF1A\u6587\u4EF6\u540D\u51B2\u7A81\u8FC7\u591A");
+}
+function extractPromptBlock(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  const headingIndex = lines.findIndex(
+    (line) => /^##\s+AI\s*短视频提示词\s*$/.test(line.trim())
+  );
+  if (headingIndex < 0)
+    return void 0;
+  const values = [];
+  for (let index = headingIndex + 1; index < lines.length; index++) {
+    const line = lines[index];
+    if (/^##\s+/.test(line.trim()))
+      break;
+    values.push(line);
+  }
+  return values.join("\n").trim() || void 0;
 }
 var AIShortVideoPromptBuilder = class {
   constructor(textClient) {
@@ -5551,17 +5590,22 @@ var AIShortVideoPromptBuilder = class {
   }
 };
 var VideoGenerationWorkflow = class {
-  constructor(app, status, promptBuilder, settings, providerFactory = (value) => new OpenAICompatibleVideoProvider(value), markdownViewType) {
+  constructor(app, status, promptBuilder, settings, providerFactory = (value) => new OpenAICompatibleVideoProvider(value), markdownViewType, imageSettings, imageProviderFactory = (value) => new OpenAICompatibleImageProvider(value)) {
     this.app = app;
     this.status = status;
     this.promptBuilder = promptBuilder;
     this.settings = settings;
     this.providerFactory = providerFactory;
     this.markdownViewType = markdownViewType;
+    this.imageSettings = imageSettings;
+    this.imageProviderFactory = imageProviderFactory;
     this.running = false;
   }
   updateSettings(settings) {
     this.settings = { ...settings };
+  }
+  updateImageSettings(settings) {
+    this.imageSettings = { ...settings };
   }
   async run(file) {
     return this.runInternal(file);
@@ -5572,13 +5616,89 @@ var VideoGenerationWorkflow = class {
     }
     this.running = true;
     try {
-      const { target, source } = await this.resolveSource(file);
+      const { target, source } = await this.resolveSource(file, false);
       this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
       const prompt = await this.promptBuilder.build(source);
       this.status.setCompleted();
       return { success: true, file: target, prompt };
     } catch (error) {
       const message = error instanceof Error ? error.message : "\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25";
+      this.status.setError(message);
+      return { success: false, error: message };
+    } finally {
+      this.running = false;
+    }
+  }
+  async writePrompt(prompt = "", file) {
+    if (this.running) {
+      return { success: false, error: "\u77ED\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
+    }
+    this.running = true;
+    try {
+      const value = prompt.trim();
+      if (!value)
+        throw new Error("\u89C6\u9891\u63D0\u793A\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
+      const { target, markdown } = await this.resolveSource(file, false);
+      const nextContent = `${markdown.trimEnd()}
+
+## ${VIDEO_PROMPT_HEADING}
+
+${value}
+`;
+      await this.app.vault.modify(target, nextContent);
+      this.status.setCompleted();
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u89C6\u9891\u63D0\u793A\u8BCD\u5199\u5165\u5931\u8D25";
+      this.status.setError(message);
+      return { success: false, error: message };
+    } finally {
+      this.running = false;
+    }
+  }
+  async generateImage(file) {
+    var _a, _b;
+    if (this.running) {
+      return { success: false, error: "\u77ED\u89C6\u9891\u751F\u6210\u4EFB\u52A1\u6B63\u5728\u8FD0\u884C" };
+    }
+    this.running = true;
+    try {
+      const imageSettings = validateImageSettings(this.imageSettings);
+      const { target, markdown, source } = await this.resolveSource(file, false);
+      const prompt = extractPromptBlock(markdown) || source;
+      if (!prompt.trim())
+        throw new Error("\u89C6\u9891\u56FE\u7247\u63D0\u793A\u8BCD\u4E0D\u80FD\u4E3A\u7A7A");
+      this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891\u53C2\u8003\u56FE", 0, 1);
+      const image = await this.imageProviderFactory(imageSettings).generate({
+        prompt,
+        size: imageSettings.size
+      });
+      const output = await resolveAssetPath(
+        target,
+        (path) => this.app.vault.adapter.exists(path),
+        "video-reference",
+        image.extension
+      );
+      if (!await this.app.vault.adapter.exists(output.assetDirPath)) {
+        await ((_b = (_a = this.app.vault).createFolder) == null ? void 0 : _b.call(_a, output.assetDirPath));
+      }
+      await this.app.vault.adapter.writeBinary(
+        output.assetPath,
+        exactArrayBuffer2(image.bytes)
+      );
+      const embedPath = relativeEmbedPath(target.path, output.assetPath);
+      const nextContent = `${markdown.trimEnd()}
+
+## ${VIDEO_IMAGE_HEADING}
+
+![[${embedPath}]]
+`;
+      await this.app.vault.modify(target, nextContent);
+      this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891\u53C2\u8003\u56FE", 1, 1);
+      this.status.setCompleted();
+      return { success: true, outputPath: output.assetPath };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "\u77ED\u89C6\u9891\u53C2\u8003\u56FE\u751F\u6210\u5931\u8D25";
       this.status.setError(message);
       return { success: false, error: message };
     } finally {
@@ -5595,8 +5715,8 @@ var VideoGenerationWorkflow = class {
     }
     this.running = true;
     try {
-      const { target, markdown, source } = await this.resolveSource(file);
-      let prompt = confirmedPrompt == null ? void 0 : confirmedPrompt.trim();
+      const { target, markdown, source } = await this.resolveSource(file, true);
+      let prompt = (confirmedPrompt == null ? void 0 : confirmedPrompt.trim()) || extractPromptBlock(markdown);
       if (!prompt) {
         this.status.setProcessing("\u6B63\u5728\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD");
         prompt = await this.promptBuilder.build(source);
@@ -5609,29 +5729,30 @@ var VideoGenerationWorkflow = class {
         size: this.settings.size,
         duration: this.settings.duration
       });
-      const output = await resolveVideoPath(
+      const output = await resolveAssetPath(
         target,
         (path) => this.app.vault.adapter.exists(path),
+        "video",
         video.extension
       );
       if (!await this.app.vault.adapter.exists(output.assetDirPath)) {
         await ((_b = (_a = this.app.vault).createFolder) == null ? void 0 : _b.call(_a, output.assetDirPath));
       }
       await this.app.vault.adapter.writeBinary(
-        output.videoPath,
+        output.assetPath,
         exactArrayBuffer2(video.bytes)
       );
-      const embedPath = relativeEmbedPath(target.path, output.videoPath);
+      const embedPath = relativeEmbedPath(target.path, output.assetPath);
       const nextContent = `${markdown.trimEnd()}
 
-## AI \u751F\u6210\u77ED\u89C6\u9891
+## ${VIDEO_OUTPUT_HEADING}
 
 ![[${embedPath}]]
 `;
       await this.app.vault.modify(target, nextContent);
       this.status.setProgress("\u6B63\u5728\u751F\u6210\u77ED\u89C6\u9891", 1, 1);
       this.status.setCompleted();
-      return { success: true, outputPath: output.videoPath };
+      return { success: true, outputPath: output.assetPath };
     } catch (error) {
       const message = error instanceof Error ? error.message : "\u77ED\u89C6\u9891\u751F\u6210\u5931\u8D25";
       this.status.setError(message);
@@ -5640,12 +5761,13 @@ var VideoGenerationWorkflow = class {
       this.running = false;
     }
   }
-  async resolveSource(file) {
+  async resolveSource(file, shouldValidateVideo = true) {
     const target = file || this.app.workspace.getActiveFile();
     if (!target || target.extension !== "md") {
       throw new Error("\u8BF7\u5148\u6253\u5F00\u4E00\u7BC7 Markdown \u7B14\u8BB0");
     }
-    validateSettings2(this.settings);
+    if (shouldValidateVideo)
+      validateSettings2(this.settings);
     const markdown = await this.app.vault.read(target);
     const selected = this.getSelection(target);
     const source = (selected || markdown).trim();
@@ -7784,7 +7906,9 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       new AIShortVideoPromptBuilder(this.aiService),
       this.settings.videos,
       (value) => new OpenAICompatibleVideoProvider(value, obsidianFetch),
-      import_obsidian14.MarkdownView
+      import_obsidian14.MarkdownView,
+      this.settings.images,
+      (value) => new OpenAICompatibleImageProvider(value, obsidianFetch)
     );
     this.contextMenuService = new ContextMenuService(
       this.app,
@@ -7823,8 +7947,18 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       callback: () => this.executeWeChatImageInsertion()
     });
     this.addCommand({
+      id: "prepare-short-video-prompt",
+      name: "\u751F\u6210\u77ED\u89C6\u9891\u63D0\u793A\u8BCD",
+      callback: () => this.executeShortVideoPromptGeneration()
+    });
+    this.addCommand({
+      id: "generate-short-video-image",
+      name: "\u751F\u6210\u77ED\u89C6\u9891\u56FE\u7247",
+      callback: () => this.executeShortVideoImageGeneration()
+    });
+    this.addCommand({
       id: "generate-short-video",
-      name: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891",
+      name: "\u751F\u6210\u77ED\u89C6\u9891",
       callback: () => this.executeShortVideoGeneration()
     });
     this.addCommand({
@@ -7877,7 +8011,7 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     console.log("AI Workbench unloaded");
   }
   async loadSettings() {
-    var _a, _b;
+    var _a, _b, _c;
     const saved = await this.loadData();
     this.publishingHistory = Array.isArray(saved == null ? void 0 : saved.publishingHistory) ? saved.publishingHistory.slice(0, 50) : [];
     this.settings = {
@@ -7899,10 +8033,14 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       },
       i18n: { ...DEFAULT_SETTINGS.i18n, ...saved == null ? void 0 : saved.i18n }
     };
-    this.settings.customPrompts.prompts = withDefaultSidebarPrompts(this.settings.customPrompts.prompts);
+    this.settings.customPrompts.deletedDefaultPromptIds = ((_c = saved == null ? void 0 : saved.customPrompts) == null ? void 0 : _c.deletedDefaultPromptIds) || [];
+    this.settings.customPrompts.prompts = withDefaultSidebarPrompts(
+      this.settings.customPrompts.prompts,
+      this.settings.customPrompts.deletedDefaultPromptIds
+    );
   }
   async saveSettings() {
-    var _a, _b;
+    var _a, _b, _c;
     await this.saveData({
       ...this.settings,
       publishingHistory: this.publishingHistory
@@ -7916,7 +8054,8 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.statusBarService.setEnabled(this.settings.ui.showStatusBar);
     this.weChatImageWorkflow.updateSettings(this.settings.images);
     (_a = this.videoGenerationWorkflow) == null ? void 0 : _a.updateSettings(this.settings.videos);
-    (_b = this.publishingService) == null ? void 0 : _b.updateSettings(this.settings.publishing);
+    (_b = this.videoGenerationWorkflow) == null ? void 0 : _b.updateImageSettings(this.settings.images);
+    (_c = this.publishingService) == null ? void 0 : _c.updateSettings(this.settings.publishing);
     this.refreshWorkbenchViews();
   }
   refreshWorkbenchViews() {
@@ -7931,6 +8070,17 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
    */
   getCustomPromptsService() {
     return this.customPromptsService;
+  }
+  async deleteCustomPrompt(promptId) {
+    const defaultIds = new Set(getDefaultSidebarPrompts().map((prompt) => prompt.id));
+    if (defaultIds.has(promptId)) {
+      const deleted = new Set(this.settings.customPrompts.deletedDefaultPromptIds || []);
+      deleted.add(promptId);
+      this.settings.customPrompts.deletedDefaultPromptIds = [...deleted];
+    }
+    this.customPromptsService.delete(promptId);
+    await this.saveSettings();
+    this.refreshCustomPromptCommands();
   }
   getShortcutsService() {
     return this.shortcutsService;
@@ -8132,6 +8282,10 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     this.shortcutsService.registerAll((actionId, customPromptId) => {
       if (actionId === "wechat-insert-images") {
         this.executeWeChatImageInsertion();
+      } else if (actionId === "prepare-short-video-prompt") {
+        this.executeShortVideoPromptGeneration();
+      } else if (actionId === "generate-short-video-image") {
+        this.executeShortVideoImageGeneration();
       } else if (actionId === "generate-short-video") {
         this.executeShortVideoGeneration();
       } else if (actionId === "custom" && customPromptId) {
@@ -8385,6 +8539,79 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
       this.isProcessing = false;
     }
   }
+  async executeShortVideoPromptGeneration() {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.videoGenerationWorkflow.run();
+      await this.handleGeneratedShortVideo(result);
+      return;
+      const prepared = await this.videoGenerationWorkflow.preparePrompt();
+      if (!prepared.success || !prepared.prompt || !prepared.file) {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25\uFF1A${prepared.error || "\u672A\u77E5\u9519\u8BEF"}`);
+        return;
+      }
+      new ShortVideoPromptModal(
+        this.app,
+        prepared.prompt,
+        (prompt) => this.writeShortVideoPrompt(prompt, prepared.file)
+      ).open();
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async executeShortVideoImageGeneration(file) {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.videoGenerationWorkflow.generateImage(file);
+      if (result.success) {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u56FE\u7247\u751F\u6210\u5B8C\u6210\uFF1A${result.outputPath || ""}`);
+      } else {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u56FE\u7247\u751F\u6210\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async writeShortVideoPrompt(prompt, file) {
+    if (this.isProcessing) {
+      new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
+      return;
+    }
+    this.isProcessing = true;
+    try {
+      const result = await this.videoGenerationWorkflow.writePrompt(prompt, file);
+      if (result.success) {
+        new import_obsidian14.Notice("\u77ED\u89C6\u9891\u63D0\u793A\u8BCD\u5DF2\u5199\u5165\u5F53\u524D\u7B14\u8BB0");
+      } else {
+        new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u63D0\u793A\u8BCD\u5199\u5165\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+  async handleGeneratedShortVideo(result) {
+    if (result.success) {
+      new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5B8C\u6210\uFF1A${result.outputPath || ""}`);
+      if (result.outputPath) {
+        const platforms = this.getVideoPublishingPlatforms();
+        if (platforms.length > 0) {
+          await this.openPublishingModal(platforms, {
+            video: createVaultVideoMedia(result.outputPath)
+          });
+        }
+      }
+    } else {
+      new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u751F\u6210\u5931\u8D25\uFF1A${result.error || "\u672A\u77E5\u9519\u8BEF"}`);
+    }
+  }
   async executeShortVideoGeneration() {
     if (this.isProcessing) {
       new import_obsidian14.Notice("\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019...");
@@ -8392,6 +8619,9 @@ var AIWorkbenchPlugin = class extends import_obsidian14.Plugin {
     }
     this.isProcessing = true;
     try {
+      const directResult = await this.videoGenerationWorkflow.run();
+      await this.handleGeneratedShortVideo(directResult);
+      return;
       const prepared = await this.videoGenerationWorkflow.preparePrompt();
       if (!prepared.success || !prepared.prompt || !prepared.file) {
         new import_obsidian14.Notice(`\u77ED\u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210\u5931\u8D25\uFF1A${prepared.error || "\u672A\u77E5\u9519\u8BEF"}`);
@@ -8670,7 +8900,7 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
           cls: "category-title"
         });
         header2.createEl("span", {
-          text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 1 : 0)),
+          text: String(prompts.length + (isWeChatCategory ? 1 : 0) + (isVideoCategory ? 3 : 0)),
           cls: "category-count"
         });
         const buttonsContainer2 = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
@@ -8693,6 +8923,20 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
           });
         }
         if (isVideoCategory) {
+          const promptButton = buttonsContainer2.createEl("button", {
+            cls: "ai-workbench-action-btn custom ai-workbench-generate-video-prompt",
+            text: "\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD"
+          });
+          promptButton.addEventListener("click", () => {
+            this.plugin.executeShortVideoPromptGeneration();
+          });
+          const imageButton = buttonsContainer2.createEl("button", {
+            cls: "ai-workbench-action-btn custom ai-workbench-generate-video-image",
+            text: "\u751F\u6210\u89C6\u9891\u56FE\u7247"
+          });
+          imageButton.addEventListener("click", () => {
+            this.plugin.executeShortVideoImageGeneration();
+          });
           const videoButton = buttonsContainer2.createEl("button", {
             cls: "ai-workbench-action-btn custom ai-workbench-generate-video",
             text: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891"
@@ -8725,8 +8969,22 @@ var WorkbenchView = class extends import_obsidian14.ItemView {
       });
       const header2 = categoryContainer.createDiv({ cls: "ai-workbench-category-header" });
       header2.createEl("span", { text: "\u{1F4F1} \u77ED\u89C6\u9891", cls: "category-title" });
-      header2.createEl("span", { text: "1", cls: "category-count" });
+      header2.createEl("span", { text: "3", cls: "category-count" });
       const videoButtons = categoryContainer.createDiv({ cls: "ai-workbench-buttons" });
+      const promptButton = videoButtons.createEl("button", {
+        cls: "ai-workbench-action-btn custom ai-workbench-generate-video-prompt",
+        text: "\u751F\u6210\u89C6\u9891\u63D0\u793A\u8BCD"
+      });
+      promptButton.addEventListener("click", () => {
+        this.plugin.executeShortVideoPromptGeneration();
+      });
+      const imageButton = videoButtons.createEl("button", {
+        cls: "ai-workbench-action-btn custom ai-workbench-generate-video-image",
+        text: "\u751F\u6210\u89C6\u9891\u56FE\u7247"
+      });
+      imageButton.addEventListener("click", () => {
+        this.plugin.executeShortVideoImageGeneration();
+      });
       const videoButton = videoButtons.createEl("button", {
         cls: "ai-workbench-action-btn custom ai-workbench-generate-video",
         text: "\u4E00\u952E\u751F\u6210\u77ED\u89C6\u9891"

@@ -1,3 +1,5 @@
+import type { ImageGenerationSettings, ImageProvider } from '../wechat-images/types';
+import { OpenAICompatibleImageProvider } from '../wechat-images/image-provider';
 import type { VideoGenerationSettings, VideoProvider } from './types';
 import { OpenAICompatibleVideoProvider } from './video-provider';
 
@@ -48,6 +50,11 @@ export interface VideoPromptPreparationResult {
 }
 
 type ProviderFactory = (settings: VideoGenerationSettings) => VideoProvider;
+type ImageProviderFactory = (settings: ImageGenerationSettings) => ImageProvider;
+
+const VIDEO_PROMPT_HEADING = 'AI 短视频提示词';
+const VIDEO_IMAGE_HEADING = 'AI 短视频参考图';
+const VIDEO_OUTPUT_HEADING = 'AI 生成短视频';
 
 function validateSettings(settings: VideoGenerationSettings): void {
     let url: URL;
@@ -66,6 +73,24 @@ function validateSettings(settings: VideoGenerationSettings): void {
     if (settings.duration < 1 || settings.duration > 60) {
         throw new Error('视频时长必须在 1 到 60 秒之间');
     }
+}
+
+function validateImageSettings(settings?: ImageGenerationSettings): ImageGenerationSettings {
+    if (!settings) throw new Error('请先配置图片生成模型');
+    let url: URL;
+    try {
+        url = new URL(settings.endpoint);
+    } catch {
+        throw new Error('图片 API 地址格式无效');
+    }
+    const localhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && localhost)) {
+        throw new Error('图片 API 必须使用 HTTPS，本地服务除外');
+    }
+    if (!settings.apiKey.trim()) throw new Error('请先配置图片 API Key');
+    if (!settings.model.trim()) throw new Error('请先配置图片模型');
+    if (!settings.size.trim()) throw new Error('请先配置图片尺寸');
+    return settings;
 }
 
 function exactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -98,21 +123,37 @@ function relativeEmbedPath(filePath: string, assetPath: string): string {
         : assetPath;
 }
 
-async function resolveVideoPath(
+async function resolveAssetPath(
     file: WorkflowFile,
     exists: (path: string) => Promise<boolean>,
-    extension: string = 'mp4'
-): Promise<{ assetDirPath: string; videoPath: string }> {
+    filenamePrefix: string,
+    extension: string
+): Promise<{ assetDirPath: string; assetPath: string }> {
     const { parent, basename } = splitPath(file.path);
     const assetDirPath = joinPath(parent, `${basename}-assets`);
     for (let counter = 1; counter <= 100; counter++) {
-        const videoPath = joinPath(
+        const assetPath = joinPath(
             assetDirPath,
-            `video-${String(counter).padStart(2, '0')}.${extension}`
+            `${filenamePrefix}-${String(counter).padStart(2, '0')}.${extension}`
         );
-        if (!await exists(videoPath)) return { assetDirPath, videoPath };
+        if (!await exists(assetPath)) return { assetDirPath, assetPath };
     }
-    throw new Error('无法创建视频文件：文件名冲突过多');
+    throw new Error('无法创建文件：文件名冲突过多');
+}
+
+function extractPromptBlock(markdown: string): string | undefined {
+    const lines = markdown.split(/\r?\n/);
+    const headingIndex = lines.findIndex(line =>
+        /^##\s+AI\s*短视频提示词\s*$/.test(line.trim())
+    );
+    if (headingIndex < 0) return undefined;
+    const values: string[] = [];
+    for (let index = headingIndex + 1; index < lines.length; index++) {
+        const line = lines[index];
+        if (/^##\s+/.test(line.trim())) break;
+        values.push(line);
+    }
+    return values.join('\n').trim() || undefined;
 }
 
 export class AIShortVideoPromptBuilder implements VideoPromptBuilder {
@@ -143,11 +184,18 @@ export class VideoGenerationWorkflow {
         private settings: VideoGenerationSettings,
         private providerFactory: ProviderFactory =
             value => new OpenAICompatibleVideoProvider(value),
-        private markdownViewType?: unknown
+        private markdownViewType?: unknown,
+        private imageSettings?: ImageGenerationSettings,
+        private imageProviderFactory: ImageProviderFactory =
+            value => new OpenAICompatibleImageProvider(value)
     ) {}
 
     updateSettings(settings: VideoGenerationSettings): void {
         this.settings = { ...settings };
+    }
+
+    updateImageSettings(settings: ImageGenerationSettings): void {
+        this.imageSettings = { ...settings };
     }
 
     async run(file?: WorkflowFile): Promise<VideoWorkflowResult> {
@@ -161,13 +209,83 @@ export class VideoGenerationWorkflow {
         this.running = true;
 
         try {
-            const { target, source } = await this.resolveSource(file);
+            const { target, source } = await this.resolveSource(file, false);
             this.status.setProcessing('正在生成视频提示词');
             const prompt = await this.promptBuilder.build(source);
             this.status.setCompleted();
             return { success: true, file: target, prompt };
         } catch (error) {
             const message = error instanceof Error ? error.message : '视频提示词生成失败';
+            this.status.setError(message);
+            return { success: false, error: message };
+        } finally {
+            this.running = false;
+        }
+    }
+
+    async writePrompt(prompt: string = '', file?: WorkflowFile): Promise<VideoWorkflowResult> {
+        if (this.running) {
+            return { success: false, error: '短视频生成任务正在运行' };
+        }
+        this.running = true;
+
+        try {
+            const value = prompt.trim();
+            if (!value) throw new Error('视频提示词不能为空');
+            const { target, markdown } = await this.resolveSource(file, false);
+            const nextContent = `${markdown.trimEnd()}\n\n## ${VIDEO_PROMPT_HEADING}\n\n${value}\n`;
+            await this.app.vault.modify(target, nextContent);
+            this.status.setCompleted();
+            return { success: true };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '视频提示词写入失败';
+            this.status.setError(message);
+            return { success: false, error: message };
+        } finally {
+            this.running = false;
+        }
+    }
+
+    async generateImage(file?: WorkflowFile): Promise<VideoWorkflowResult> {
+        if (this.running) {
+            return { success: false, error: '短视频生成任务正在运行' };
+        }
+        this.running = true;
+
+        try {
+            const imageSettings = validateImageSettings(this.imageSettings);
+            const { target, markdown, source } = await this.resolveSource(file, false);
+            const prompt = extractPromptBlock(markdown) || source;
+            if (!prompt.trim()) throw new Error('视频图片提示词不能为空');
+
+            this.status.setProgress('正在生成短视频参考图', 0, 1);
+            const image = await this.imageProviderFactory(imageSettings).generate({
+                prompt,
+                size: imageSettings.size
+            });
+            const output = await resolveAssetPath(
+                target,
+                path => this.app.vault.adapter.exists(path),
+                'video-reference',
+                image.extension
+            );
+            if (!await this.app.vault.adapter.exists(output.assetDirPath)) {
+                await this.app.vault.createFolder?.(output.assetDirPath);
+            }
+            await this.app.vault.adapter.writeBinary(
+                output.assetPath,
+                exactArrayBuffer(image.bytes)
+            );
+
+            const embedPath = relativeEmbedPath(target.path, output.assetPath);
+            const nextContent = `${markdown.trimEnd()}\n\n## ${VIDEO_IMAGE_HEADING}\n\n![[${embedPath}]]\n`;
+            await this.app.vault.modify(target, nextContent);
+
+            this.status.setProgress('正在生成短视频参考图', 1, 1);
+            this.status.setCompleted();
+            return { success: true, outputPath: output.assetPath };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '短视频参考图生成失败';
             this.status.setError(message);
             return { success: false, error: message };
         } finally {
@@ -186,8 +304,8 @@ export class VideoGenerationWorkflow {
         this.running = true;
 
         try {
-            const { target, markdown, source } = await this.resolveSource(file);
-            let prompt = confirmedPrompt?.trim();
+            const { target, markdown, source } = await this.resolveSource(file, true);
+            let prompt = confirmedPrompt?.trim() || extractPromptBlock(markdown);
             if (!prompt) {
                 this.status.setProcessing('正在生成视频提示词');
                 prompt = await this.promptBuilder.build(source);
@@ -200,26 +318,27 @@ export class VideoGenerationWorkflow {
                 size: this.settings.size,
                 duration: this.settings.duration
             });
-            const output = await resolveVideoPath(
+            const output = await resolveAssetPath(
                 target,
                 path => this.app.vault.adapter.exists(path),
+                'video',
                 video.extension
             );
             if (!await this.app.vault.adapter.exists(output.assetDirPath)) {
                 await this.app.vault.createFolder?.(output.assetDirPath);
             }
             await this.app.vault.adapter.writeBinary(
-                output.videoPath,
+                output.assetPath,
                 exactArrayBuffer(video.bytes)
             );
 
-            const embedPath = relativeEmbedPath(target.path, output.videoPath);
-            const nextContent = `${markdown.trimEnd()}\n\n## AI 生成短视频\n\n![[${embedPath}]]\n`;
+            const embedPath = relativeEmbedPath(target.path, output.assetPath);
+            const nextContent = `${markdown.trimEnd()}\n\n## ${VIDEO_OUTPUT_HEADING}\n\n![[${embedPath}]]\n`;
             await this.app.vault.modify(target, nextContent);
 
             this.status.setProgress('正在生成短视频', 1, 1);
             this.status.setCompleted();
-            return { success: true, outputPath: output.videoPath };
+            return { success: true, outputPath: output.assetPath };
         } catch (error) {
             const message = error instanceof Error ? error.message : '短视频生成失败';
             this.status.setError(message);
@@ -229,7 +348,7 @@ export class VideoGenerationWorkflow {
         }
     }
 
-    private async resolveSource(file?: WorkflowFile): Promise<{
+    private async resolveSource(file?: WorkflowFile, shouldValidateVideo: boolean = true): Promise<{
         target: WorkflowFile;
         markdown: string;
         source: string;
@@ -239,7 +358,7 @@ export class VideoGenerationWorkflow {
             throw new Error('请先打开一篇 Markdown 笔记');
         }
 
-        validateSettings(this.settings);
+        if (shouldValidateVideo) validateSettings(this.settings);
         const markdown = await this.app.vault.read(target);
         const selected = this.getSelection(target);
         const source = (selected || markdown).trim();

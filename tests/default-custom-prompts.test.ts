@@ -47,3 +47,11 @@ test('default sidebar prompts are merged without duplicating existing user promp
     assert.equal(matches.length, 1);
     assert.equal(matches[0].prompt, 'user customized prompt');
 });
+
+test('deleted default sidebar prompts stay deleted after settings reload', () => {
+    const [defaultPrompt] = getDefaultSidebarPrompts();
+
+    const merged = withDefaultSidebarPrompts([], [defaultPrompt.id]);
+
+    assert.equal(merged.some(prompt => prompt.id === defaultPrompt.id), false);
+});

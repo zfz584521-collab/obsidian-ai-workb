@@ -12,6 +12,11 @@ const mp4 = {
     extension: 'mp4',
     mimeType: 'video/mp4'
 };
+const png = {
+    bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    extension: 'png',
+    mimeType: 'image/png'
+};
 
 function settings(overrides = {}) {
     return {
@@ -122,6 +127,57 @@ test('prepares an editable prompt without requesting video generation', async ()
     assert.equal(state.binaries.length, 0);
     assert.equal(state.modified.length, 0);
     assert.equal(state.providerRequest, undefined);
+});
+
+test('writes a prepared video prompt into the current note without requiring video settings', async () => {
+    const { VideoGenerationWorkflow } = await importTypeScript(entry);
+    const state = harness({ prompt: 'editable prompt draft' });
+    const workflow = new VideoGenerationWorkflow(
+        state.app, state.status, state.promptBuilder,
+        settings({ apiKey: '', endpoint: 'http://evil.example' }),
+        state.providerFactory
+    );
+
+    const prepared = await workflow.preparePrompt();
+    const result = await workflow.writePrompt(prepared.prompt, prepared.file);
+
+    assert.equal(prepared.success, true);
+    assert.equal(result.success, true);
+    assert.match(state.modified[0].content, /## AI 短视频提示词/);
+    assert.match(state.modified[0].content, /editable prompt draft/);
+    assert.equal(state.binaries.length, 0);
+});
+
+test('generates a video reference image with image settings and inserts an embed', async () => {
+    const { VideoGenerationWorkflow } = await importTypeScript(entry);
+    const state = harness({ source: '# Title\n\n## AI 短视频提示词\n\nA vertical product video prompt\n' });
+    let imageRequest;
+    const imageProviderFactory = () => ({
+        generate: async request => {
+            imageRequest = request;
+            return png;
+        }
+    });
+    const workflow = new VideoGenerationWorkflow(
+        state.app,
+        state.status,
+        state.promptBuilder,
+        settings({ apiKey: '', endpoint: 'http://evil.example' }),
+        state.providerFactory,
+        undefined,
+        { endpoint: 'https://image.example.com/v1', apiKey: 'image-key', model: 'image-model', size: '1024x1024', timeout: 10 },
+        imageProviderFactory
+    );
+
+    const result = await workflow.generateImage();
+
+    assert.equal(result.success, true);
+    assert.equal(result.outputPath, 'notes/script-assets/video-reference-01.png');
+    assert.equal(imageRequest.prompt, 'A vertical product video prompt');
+    assert.equal(imageRequest.size, '1024x1024');
+    assert.equal(state.providerRequest, undefined);
+    assert.equal(state.binaries[0].path, 'notes/script-assets/video-reference-01.png');
+    assert.match(state.modified[0].content, /!\[\[script-assets\/video-reference-01\.png\]\]/);
 });
 
 test('generates a video from a confirmed editable prompt', async () => {

@@ -147,3 +147,12 @@ test('Xiaohongshu automation lives in configurable custom prompts', async () => 
     assert.match(customPromptsSource, /getEnabled\(\)/);
     assert.match(settingsSource, /setName\('启用 Prompt'\)/);
 });
+
+test('automation custom prompts can be deleted from settings', () => {
+    assert.doesNotMatch(
+        settingsSource,
+        /if \(!prompt\.automationAction\)[\s\S]*common\.delete/,
+        'automation prompts should not hide the delete button'
+    );
+    assert.match(settingsSource, /deleteCustomPrompt\(prompt\.id\)/);
+});
