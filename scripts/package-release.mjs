@@ -8,10 +8,18 @@ const version = manifest.version;
 const releaseDir = path.join(root, 'release');
 const zipName = `ai-workbench-v${version}.zip`;
 
-const requiredFiles = ['main.js', 'manifest.json', 'styles.css', 'README.md'];
+const requiredFiles = [
+    'main.js',
+    'manifest.json',
+    'styles.css',
+    'README.md',
+    'scripts/xhs-draft-server.mjs'
+];
 
+await rm(releaseDir, { recursive: true, force: true });
 await mkdir(releaseDir, { recursive: true });
 for (const file of requiredFiles) {
+    await mkdir(path.dirname(path.join(releaseDir, file)), { recursive: true });
     await copyFile(path.join(root, file), path.join(releaseDir, file));
 }
 
@@ -23,7 +31,7 @@ const command = [
     '$ErrorActionPreference = "Stop";',
     'Compress-Archive',
     '-Path',
-    requiredFiles.map(file => `'${path.join(releaseDir, file).replace(/'/g, "''")}'`).join(','),
+    `'${path.join(releaseDir, '*').replace(/'/g, "''")}'`,
     '-DestinationPath',
     `'${tempZipPath.replace(/'/g, "''")}'`,
     '-Force'

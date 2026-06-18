@@ -56,10 +56,21 @@ class CdpClient {
 }
 
 async function getXhsPage() {
-  const pages = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+  let pages;
+  try {
+    const response = await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`);
+    pages = await response.json();
+  } catch {
+    throw new Error(`无法连接 Edge 调试端口 ${CDP_PORT}。请先关闭所有 Edge 窗口，然后运行: msedge.exe --remote-debugging-port=${CDP_PORT} --user-data-dir="%TEMP%\\xhs-edge-profile" https://creator.xiaohongshu.com`);
+  }
+
+  if (!Array.isArray(pages)) {
+    throw new Error(`Edge 调试端口 ${CDP_PORT} 返回异常，请重新用调试端口启动 Edge`);
+  }
+
   const page = pages.find(item => item.url.includes('creator.xiaohongshu.com'));
   if (!page) {
-    throw new Error(`请先用带调试端口的 Edge 打开小红书创作服务平台: ${CDP_PORT}`);
+    throw new Error(`请在调试端口 ${CDP_PORT} 对应的 Edge 窗口中打开并登录小红书创作服务平台: https://creator.xiaohongshu.com`);
   }
   const client = new CdpClient(page.webSocketDebuggerUrl);
   await client.connect();
