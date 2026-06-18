@@ -5948,10 +5948,11 @@ var WebhookClient = class {
         body: rawBody
       });
       if (!response.ok) {
+        const detail = await readErrorDetail(response);
         return failure(
           request.platform,
           "WEBHOOK_HTTP_ERROR",
-          `\u4E2D\u8F6C\u670D\u52A1\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`,
+          appendErrorDetail(`\u4E2D\u8F6C\u670D\u52A1\u8BF7\u6C42\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`, detail),
           isRetryableStatus(response.status)
         );
       }
@@ -6039,9 +6040,10 @@ var WebhookClient = class {
       body: form
     });
     if (!response.ok) {
+      const detail = await readErrorDetail(response);
       throw new WebhookClientError(
         "MEDIA_UPLOAD_FAILED",
-        `\u5A92\u4F53\u4E0A\u4F20\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`,
+        appendErrorDetail(`\u5A92\u4F53\u4E0A\u4F20\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`, detail),
         isRetryableStatus(response.status)
       );
     }
@@ -6088,6 +6090,45 @@ async function readJson(response) {
   } catch (e) {
     return null;
   }
+}
+async function readErrorDetail(response) {
+  let value = "";
+  try {
+    const text = await response.text();
+    if (!text.trim())
+      return "";
+    try {
+      const body = JSON.parse(text);
+      value = extractErrorMessage(body);
+    } catch (e) {
+      value = text;
+    }
+  } catch (e) {
+    return "";
+  }
+  return sanitizeErrorDetail(value);
+}
+function extractErrorMessage(body) {
+  var _a, _b;
+  if (!body)
+    return "";
+  if (typeof body === "string")
+    return body;
+  if (typeof body.message === "string")
+    return body.message;
+  if (typeof body.error === "string")
+    return body.error;
+  if (typeof ((_a = body.error) == null ? void 0 : _a.message) === "string")
+    return body.error.message;
+  if (typeof ((_b = body.error) == null ? void 0 : _b.code) === "string")
+    return body.error.code;
+  return "";
+}
+function sanitizeErrorDetail(value) {
+  return value.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer ***").replace(/(api[_-]?key|token|secret|authorization)(["'\s:=]+)[^"',\s}]+/gi, "$1$2***").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+function appendErrorDetail(message, detail) {
+  return detail ? `${message}\uFF1A${detail}` : message;
 }
 function isRetryableStatus(status) {
   return status === 429 || status >= 500;

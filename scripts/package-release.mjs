@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
@@ -16,14 +16,16 @@ for (const file of requiredFiles) {
 }
 
 const zipPath = path.join(root, zipName);
-await rm(zipPath, { force: true });
+const tempZipPath = path.join(root, `${zipName}.tmp.zip`);
+await rm(tempZipPath, { force: true });
 
 const command = [
+    '$ErrorActionPreference = "Stop";',
     'Compress-Archive',
     '-Path',
     requiredFiles.map(file => `'${path.join(releaseDir, file).replace(/'/g, "''")}'`).join(','),
     '-DestinationPath',
-    `'${zipPath.replace(/'/g, "''")}'`,
+    `'${tempZipPath.replace(/'/g, "''")}'`,
     '-Force'
 ].join(' ');
 
@@ -35,6 +37,14 @@ if (result.status !== 0) {
     throw new Error('Failed to create release zip with PowerShell Compress-Archive');
 }
 
+const tempZip = await stat(tempZipPath);
+if (tempZip.size < 50_000) {
+    await rm(tempZipPath, { force: true });
+    throw new Error(`Release zip looks incomplete (${tempZip.size} bytes)`);
+}
+
+await rm(zipPath, { force: true });
+await rename(tempZipPath, zipPath);
 const zip = await stat(zipPath);
 await writeFile(
     path.join(releaseDir, 'README.md'),

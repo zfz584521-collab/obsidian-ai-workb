@@ -142,6 +142,22 @@ test('WebhookClient normalizes HTTP and invalid response errors', async () => {
     assert.equal(invalidResult.error?.code, 'WEBHOOK_INVALID_RESPONSE');
 });
 
+test('WebhookClient includes safe relay error details for HTTP failures', async () => {
+    const result = await new WebhookClient(async () =>
+        jsonResponse({
+            success: false,
+            error: {
+                code: 'XHS_DRAFT_SERVER_ERROR',
+                message: '请先用带调试端口的 Edge 打开小红书创作服务平台: 9222'
+            }
+        }, 500)
+    ).createDraft(createRequest('remote'));
+
+    assert.equal(result.error?.code, 'WEBHOOK_HTTP_ERROR');
+    assert.match(result.error?.message || '', /HTTP 500/);
+    assert.match(result.error?.message || '', /调试端口/);
+});
+
 test('connection test contains no note content', async () => {
     let body = '';
     const client = new WebhookClient(async (_input, init) => {

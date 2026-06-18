@@ -135,10 +135,11 @@ export class WebhookClient {
             });
 
             if (!response.ok) {
+                const detail = await readErrorDetail(response);
                 return failure(
                     request.platform,
                     'WEBHOOK_HTTP_ERROR',
-                    `中转服务请求失败（HTTP ${response.status}）`,
+                    appendErrorDetail(`中转服务请求失败（HTTP ${response.status}）`, detail),
                     isRetryableStatus(response.status)
                 );
             }
@@ -241,9 +242,10 @@ export class WebhookClient {
         });
 
         if (!response.ok) {
+            const detail = await readErrorDetail(response);
             throw new WebhookClientError(
                 'MEDIA_UPLOAD_FAILED',
-                `媒体上传失败（HTTP ${response.status}）`,
+                appendErrorDetail(`媒体上传失败（HTTP ${response.status}）`, detail),
                 isRetryableStatus(response.status)
             );
         }
@@ -298,6 +300,47 @@ async function readJson(response: Response): Promise<any | null> {
     } catch {
         return null;
     }
+}
+
+async function readErrorDetail(response: Response): Promise<string> {
+    let value = '';
+    try {
+        const text = await response.text();
+        if (!text.trim()) return '';
+        try {
+            const body = JSON.parse(text);
+            value = extractErrorMessage(body);
+        } catch {
+            value = text;
+        }
+    } catch {
+        return '';
+    }
+
+    return sanitizeErrorDetail(value);
+}
+
+function extractErrorMessage(body: any): string {
+    if (!body) return '';
+    if (typeof body === 'string') return body;
+    if (typeof body.message === 'string') return body.message;
+    if (typeof body.error === 'string') return body.error;
+    if (typeof body.error?.message === 'string') return body.error.message;
+    if (typeof body.error?.code === 'string') return body.error.code;
+    return '';
+}
+
+function sanitizeErrorDetail(value: string): string {
+    return value
+        .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer ***')
+        .replace(/(api[_-]?key|token|secret|authorization)(["'\s:=]+)[^"',\s}]+/gi, '$1$2***')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 240);
+}
+
+function appendErrorDetail(message: string, detail: string): string {
+    return detail ? `${message}：${detail}` : message;
 }
 
 function isRetryableStatus(status: number): boolean {
