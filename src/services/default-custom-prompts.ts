@@ -5,7 +5,7 @@
  * endpoints, publishing accounts, and other local secrets stay in data.json.
  */
 
-import { CustomPrompt, DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS } from '../types';
+import { CustomPrompt } from '../types';
 import { getAllPresets } from './presets';
 
 const SIDEBAR_DEFAULT_CATEGORIES = new Set([
@@ -18,6 +18,7 @@ const SIDEBAR_DEFAULT_CATEGORIES = new Set([
 ]);
 
 function defaultPromptId(prompt: Pick<CustomPrompt, 'category' | 'name'>, index: number): string {
+    if (prompt.automationAction) return `builtin-${prompt.automationAction}`;
     const category = prompt.category || 'uncategorized';
     return `builtin-${category}-${index + 1}`;
 }
@@ -33,10 +34,7 @@ export function getDefaultSidebarPrompts(): CustomPrompt[] {
             updatedAt: 0
         }));
 
-    return [
-        ...presetPrompts,
-        ...DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS.map(prompt => ({ ...prompt, enabled: true }))
-    ];
+    return presetPrompts;
 }
 
 export function withDefaultSidebarPrompts(

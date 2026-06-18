@@ -2,34 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const obsidianContentSource = await readFile(
-    new URL('../src/publishing/obsidian-content.ts', import.meta.url),
-    'utf8'
-);
-const interfacesSource = await readFile(
-    new URL('../src/interfaces.ts', import.meta.url),
-    'utf8'
-);
-const settingsSource = await readFile(
-    new URL('../src/settings.ts', import.meta.url),
-    'utf8'
-);
-const publishingSettingsSource = await readFile(
-    new URL('../src/publishing/settings-ui.ts', import.meta.url),
-    'utf8'
-);
-const modalSource = await readFile(
-    new URL('../src/publishing/modal.ts', import.meta.url),
-    'utf8'
-);
-const styles = await readFile(
-    new URL('../styles.css', import.meta.url),
-    'utf8'
-);
-const mainSource = await readFile(
-    new URL('../main.ts', import.meta.url),
-    'utf8'
-);
+const obsidianContentSource = await readFile(new URL('../src/publishing/obsidian-content.ts', import.meta.url), 'utf8');
+const interfacesSource = await readFile(new URL('../src/interfaces.ts', import.meta.url), 'utf8');
+const settingsSource = await readFile(new URL('../src/settings.ts', import.meta.url), 'utf8');
+const publishingSettingsSource = await readFile(new URL('../src/publishing/settings-ui.ts', import.meta.url), 'utf8');
+const modalSource = await readFile(new URL('../src/publishing/modal.ts', import.meta.url), 'utf8');
+const styles = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
+const mainSource = await readFile(new URL('../main.ts', import.meta.url), 'utf8');
 
 test('Obsidian content extractor reads note metadata and binary media', () => {
     assert.match(obsidianContentSource, /metadataCache\.getFileCache/);
@@ -44,7 +23,6 @@ test('Obsidian content extractor exposes a narrow service interface', () => {
 });
 
 test('settings expose publishing platforms and connection controls', () => {
-    // Check for i18n function calls instead of hardcoded strings
     assert.match(settingsSource, /publishingPlatforms/);
     assert.match(publishingSettingsSource, /connectionType/);
     assert.match(publishingSettingsSource, /testConnection/);
@@ -53,7 +31,6 @@ test('settings expose publishing platforms and connection controls', () => {
 });
 
 test('publish modal supports unified content, platform overrides, and failed retry', () => {
-    // Check for i18n function calls instead of hardcoded strings
     assert.match(modalSource, /unifiedContent/);
     assert.match(modalSource, /platformSettings/);
     assert.match(modalSource, /retryFailed/);
@@ -93,7 +70,6 @@ test('platform title overrides can choose title candidates or customize title', 
 
 test('workbench renders six selectable publishing platforms', () => {
     assert.match(mainSource, /ai-workbench-publishing/);
-    // Check for i18n keys instead of hardcoded platform names
     assert.match(mainSource, /'platforms\.wechat'/);
     assert.match(mainSource, /'platforms\.xiaohongshu'/);
     assert.match(mainSource, /'platforms\.wechatChannels'/);
@@ -133,19 +109,22 @@ test('Xiaohongshu formatting exposes custom rules and two-step automation', () =
     assert.match(mainSource, /parseXiaohongshuFormattedDraft/);
 });
 
-test('Xiaohongshu automation lives in configurable custom prompts', async () => {
+test('Xiaohongshu automation lives in configurable preset prompts', async () => {
     const typesSource = await readFile(new URL('../src/types/index.ts', import.meta.url), 'utf8');
     const customPromptsSource = await readFile(new URL('../src/services/custom-prompts.ts', import.meta.url), 'utf8');
     const defaultPromptsSource = await readFile(new URL('../src/services/default-custom-prompts.ts', import.meta.url), 'utf8');
+    const presetsSource = await readFile(new URL('../src/services/presets.ts', import.meta.url), 'utf8');
 
-    assert.match(typesSource, /DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS/);
     assert.match(typesSource, /automationAction\?: 'xiaohongshu-format' \| 'xiaohongshu-format-publish'/);
     assert.match(typesSource, /enabled\?: boolean/);
     assert.match(mainSource, /withDefaultSidebarPrompts/);
-    assert.match(defaultPromptsSource, /DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS/);
+    assert.match(presetsSource, /name:\s*'小红书自动排版'/);
+    assert.match(presetsSource, /automationAction:\s*'xiaohongshu-format'/);
+    assert.match(presetsSource, /name:\s*'排版并发布草稿'/);
+    assert.match(presetsSource, /automationAction:\s*'xiaohongshu-format-publish'/);
     assert.match(defaultPromptsSource, /prompt\.automationAction === defaultPrompt\.automationAction/);
     assert.match(customPromptsSource, /getEnabled\(\)/);
-    assert.match(settingsSource, /setName\('启用 Prompt'\)/);
+    assert.match(settingsSource, /setName\(['"].*Prompt['"]\)/);
 });
 
 test('automation custom prompts can be deleted from settings', () => {

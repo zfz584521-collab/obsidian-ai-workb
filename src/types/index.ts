@@ -249,7 +249,7 @@ export const DEFAULT_SETTINGS: WorkbenchSettings = {
         showButton: true
     },
     customPrompts: {
-        prompts: DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS
+        prompts: []
     },
     shortcuts: {
         enabled: true,

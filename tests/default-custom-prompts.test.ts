@@ -18,6 +18,8 @@ test('default sidebar prompts include the early feature categories without secre
     for (const name of [
         '润色文章',
         '扩写内容',
+        '小红书自动排版',
+        '排版并发布草稿',
         '短视频脚本',
         '公众号完整排版',
         '中译英',
@@ -54,4 +56,20 @@ test('deleted default sidebar prompts stay deleted after settings reload', () =>
     const merged = withDefaultSidebarPrompts([], [defaultPrompt.id]);
 
     assert.equal(merged.some(prompt => prompt.id === defaultPrompt.id), false);
+});
+
+test('Xiaohongshu automation prompts are built into custom presets and recover from legacy deleted ids', () => {
+    const merged = withDefaultSidebarPrompts([], [
+        'xiaohongshu-format',
+        'xiaohongshu-format-publish'
+    ]);
+    const format = merged.find(prompt => prompt.automationAction === 'xiaohongshu-format');
+    const publish = merged.find(prompt => prompt.automationAction === 'xiaohongshu-format-publish');
+
+    assert.equal(format?.name, '小红书自动排版');
+    assert.equal(format?.category, 'xiaohongshu');
+    assert.equal(format?.id, 'builtin-xiaohongshu-format');
+    assert.equal(publish?.name, '排版并发布草稿');
+    assert.equal(publish?.category, 'xiaohongshu');
+    assert.equal(publish?.id, 'builtin-xiaohongshu-format-publish');
 });

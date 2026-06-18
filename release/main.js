@@ -234,32 +234,6 @@ function extractHashTags(value) {
 }
 
 // src/types/index.ts
-var DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS = [
-  {
-    id: "xiaohongshu-format",
-    name: "\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248",
-    description: "\u6309\u5C0F\u7EA2\u4E66\u98CE\u683C\u751F\u6210 5 \u4E2A\u6807\u9898\u5019\u9009\u3001\u6B63\u6587\u548C\u8BDD\u9898\u6807\u7B7E",
-    prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u8BBE\u7F6E\u91CC\u8C03\u6574\u6392\u7248\u89C4\u5219\u3002",
-    outputMode: "newFile",
-    category: "xiaohongshu",
-    enabled: true,
-    automationAction: "xiaohongshu-format",
-    createdAt: 0,
-    updatedAt: 0
-  },
-  {
-    id: "xiaohongshu-format-publish",
-    name: "\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F",
-    description: "\u5148\u81EA\u52A8\u6392\u7248\uFF0C\u518D\u4FDD\u5B58\u5230\u5C0F\u7EA2\u4E66\u8349\u7A3F\u7BB1",
-    prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u8BBE\u7F6E\u91CC\u8C03\u6574\u6392\u7248\u89C4\u5219\u3002",
-    outputMode: "newFile",
-    category: "xiaohongshu",
-    enabled: true,
-    automationAction: "xiaohongshu-format-publish",
-    createdAt: 0,
-    updatedAt: 0
-  }
-];
 var DEFAULT_SETTINGS = {
   api: {
     endpoint: "https://api.openai.com/v1",
@@ -285,7 +259,7 @@ var DEFAULT_SETTINGS = {
     showButton: true
   },
   customPrompts: {
-    prompts: DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS
+    prompts: []
   },
   shortcuts: {
     enabled: true,
@@ -2330,7 +2304,25 @@ A: \u56DE\u7B54
 \u53EA\u8FD4\u56DE\u6807\u7B7E\u3002`,
         "append",
         "xiaohongshu"
-      )
+      ),
+      {
+        name: "\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248",
+        description: "\u6309\u5C0F\u7EA2\u4E66\u98CE\u683C\u751F\u6210\u6807\u9898\u5019\u9009\u3001\u6B63\u6587\u548C\u8BDD\u9898\u6807\u7B7E",
+        prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u81EA\u52A8\u6392\u7248\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u5C0F\u7EA2\u4E66\u6392\u7248\u89C4\u5219\u8BBE\u7F6E\u91CC\u8C03\u6574\u8F93\u51FA\u98CE\u683C\u3002",
+        outputMode: "newFile",
+        category: "xiaohongshu",
+        enabled: true,
+        automationAction: "xiaohongshu-format"
+      },
+      {
+        name: "\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F",
+        description: "\u5148\u81EA\u52A8\u6392\u7248\uFF0C\u518D\u4FDD\u5B58\u5230\u5C0F\u7EA2\u4E66\u8349\u7A3F\u7BB1",
+        prompt: "\u4F7F\u7528\u201C\u5C0F\u7EA2\u4E66\u6392\u7248\u5E76\u53D1\u5E03\u8349\u7A3F\u201D\u5185\u7F6E\u6D41\u7A0B\u3002\u53EF\u5728\u5C0F\u7EA2\u4E66\u6392\u7248\u89C4\u5219\u8BBE\u7F6E\u91CC\u8C03\u6574\u8F93\u51FA\u98CE\u683C\u3002",
+        outputMode: "newFile",
+        category: "xiaohongshu",
+        enabled: true,
+        automationAction: "xiaohongshu-format-publish"
+      }
     ]
   },
   // ========== 短视频 ==========
@@ -2714,6 +2706,8 @@ var SIDEBAR_DEFAULT_CATEGORIES = /* @__PURE__ */ new Set([
   "other"
 ]);
 function defaultPromptId(prompt, index) {
+  if (prompt.automationAction)
+    return `builtin-${prompt.automationAction}`;
   const category = prompt.category || "uncategorized";
   return `builtin-${category}-${index + 1}`;
 }
@@ -2725,10 +2719,7 @@ function getDefaultSidebarPrompts() {
     createdAt: 0,
     updatedAt: 0
   }));
-  return [
-    ...presetPrompts,
-    ...DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS.map((prompt) => ({ ...prompt, enabled: true }))
-  ];
+  return presetPrompts;
 }
 function withDefaultSidebarPrompts(prompts = [], deletedDefaultPromptIds = []) {
   const deleted = new Set(deletedDefaultPromptIds);

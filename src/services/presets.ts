@@ -154,7 +154,25 @@ A: 回答
 格式：
 #标签1 #标签2 #标签3
 
-只返回标签。`, 'append', 'xiaohongshu')
+只返回标签。`, 'append', 'xiaohongshu'),
+            {
+                name: '小红书自动排版',
+                description: '按小红书风格生成标题候选、正文和话题标签',
+                prompt: '使用“小红书自动排版”内置流程。可在小红书排版规则设置里调整输出风格。',
+                outputMode: 'newFile',
+                category: 'xiaohongshu',
+                enabled: true,
+                automationAction: 'xiaohongshu-format'
+            },
+            {
+                name: '排版并发布草稿',
+                description: '先自动排版，再保存到小红书草稿箱',
+                prompt: '使用“小红书排版并发布草稿”内置流程。可在小红书排版规则设置里调整输出风格。',
+                outputMode: 'newFile',
+                category: 'xiaohongshu',
+                enabled: true,
+                automationAction: 'xiaohongshu-format-publish'
+            }
         ]
     },
     // ========== 短视频 ==========
