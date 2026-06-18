@@ -16,13 +16,14 @@ import {
     setIcon,
     requestUrl
 } from 'obsidian';
-import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt, DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS } from './src/types';
+import { WorkbenchSettings, DEFAULT_SETTINGS, ActionType, HistoryEntry, CustomPrompt } from './src/types';
 import { AIService } from './src/services/ai';
 import { BackupService } from './src/services/backup';
 import { BackupManager } from './src/services/backup-manager';
 import { FileService } from './src/services/file';
 import { ClaudianService } from './src/services/claudian';
 import { CustomPromptsService } from './src/services/custom-prompts';
+import { withDefaultSidebarPrompts } from './src/services/default-custom-prompts';
 import { ShortcutsService } from './src/services/shortcuts';
 import { ContextMenuService } from './src/services/context-menu';
 import { StatusBarService } from './src/services/status-bar';
@@ -313,23 +314,7 @@ export default class AIWorkbenchPlugin extends Plugin {
             },
             i18n: { ...DEFAULT_SETTINGS.i18n, ...saved?.i18n }
         };
-        this.settings.customPrompts.prompts = this.withDefaultAutomationPrompts(this.settings.customPrompts.prompts);
-    }
-
-    private withDefaultAutomationPrompts(prompts: CustomPrompt[] = []): CustomPrompt[] {
-        const merged = [...prompts];
-        for (const defaultPrompt of DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS) {
-            const exists = merged.some(prompt =>
-                prompt.id === defaultPrompt.id || prompt.automationAction === defaultPrompt.automationAction
-            );
-            if (!exists) {
-                merged.push({ ...defaultPrompt });
-            }
-        }
-        return merged.map(prompt => ({
-            ...prompt,
-            enabled: prompt.enabled !== false
-        }));
+        this.settings.customPrompts.prompts = withDefaultSidebarPrompts(this.settings.customPrompts.prompts);
     }
 
     async saveSettings() {

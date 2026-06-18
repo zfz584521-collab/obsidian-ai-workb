@@ -195,4 +195,4 @@ obsidian-ai-workb/
 
 ---
 
-Packaged as ai-workbench-v0.1.2.zip (87084 bytes).
+Packaged as ai-workbench-v0.1.2.zip (87653 bytes).

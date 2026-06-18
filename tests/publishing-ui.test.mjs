@@ -136,13 +136,14 @@ test('Xiaohongshu formatting exposes custom rules and two-step automation', () =
 test('Xiaohongshu automation lives in configurable custom prompts', async () => {
     const typesSource = await readFile(new URL('../src/types/index.ts', import.meta.url), 'utf8');
     const customPromptsSource = await readFile(new URL('../src/services/custom-prompts.ts', import.meta.url), 'utf8');
+    const defaultPromptsSource = await readFile(new URL('../src/services/default-custom-prompts.ts', import.meta.url), 'utf8');
 
     assert.match(typesSource, /DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS/);
     assert.match(typesSource, /automationAction\?: 'xiaohongshu-format' \| 'xiaohongshu-format-publish'/);
     assert.match(typesSource, /enabled\?: boolean/);
-    assert.match(mainSource, /withDefaultAutomationPrompts/);
-    assert.match(mainSource, /prompt\.automationAction === 'xiaohongshu-format'/);
-    assert.match(mainSource, /prompt\.automationAction === 'xiaohongshu-format-publish'/);
+    assert.match(mainSource, /withDefaultSidebarPrompts/);
+    assert.match(defaultPromptsSource, /DEFAULT_XIAOHONGSHU_AUTOMATION_PROMPTS/);
+    assert.match(defaultPromptsSource, /prompt\.automationAction === defaultPrompt\.automationAction/);
     assert.match(customPromptsSource, /getEnabled\(\)/);
     assert.match(settingsSource, /setName\('启用 Prompt'\)/);
 });
