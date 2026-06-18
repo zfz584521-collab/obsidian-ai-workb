@@ -61,6 +61,29 @@ test('requests OpenAI-compatible video generation and normalizes base64 MP4 byte
     assert.deepEqual([...video.bytes], [...mp4Bytes]);
 });
 
+test('uses a full provider task endpoint without appending the default path', async () => {
+    const { OpenAICompatibleVideoProvider } = await importTypeScript(entry);
+    let capturedUrl = '';
+    const provider = new OpenAICompatibleVideoProvider(
+        settings({
+            endpoint: 'https://api3.wlai.vip/volc/v1/contents/generations/tasks'
+        }),
+        async (url) => {
+            capturedUrl = String(url);
+            return jsonResponse({
+                data: [{ b64_json: Buffer.from(mp4Bytes).toString('base64') }]
+            });
+        }
+    );
+
+    await provider.generate({ prompt: 'shot list', size: '1080x1920', duration: 5 });
+
+    assert.equal(
+        capturedUrl,
+        'https://api3.wlai.vip/volc/v1/contents/generations/tasks'
+    );
+});
+
 test('downloads secure URL videos and rejects non-local HTTP downloads', async () => {
     const { OpenAICompatibleVideoProvider } = await importTypeScript(entry);
     const fetchFn = async (url) => {

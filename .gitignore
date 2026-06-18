@@ -45,7 +45,13 @@ stats.json
 
 # Release packages
 *.zip
-release/
+!ai-workbench-v0.1.1.zip
+!release/
+release/*
+!release/main.js
+!release/manifest.json
+!release/styles.css
+!release/README.md
 
 # Temporary files
 *.tmp

@@ -116,6 +116,14 @@ function extractResult(data: any): { b64?: string; url?: string; taskId?: string
     };
 }
 
+function resolveGenerationUrl(endpoint: URL): string {
+    const url = endpoint.toString().replace(/\/$/, '');
+    if (/\/(?:videos\/generations|contents\/generations\/tasks)$/i.test(endpoint.pathname)) {
+        return url;
+    }
+    return `${url}/videos/generations`;
+}
+
 export class OpenAICompatibleVideoProvider implements VideoProvider {
     constructor(
         private settings: VideoGenerationSettings,
@@ -126,7 +134,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
 
     async generate(request: VideoGenerationRequest): Promise<GeneratedVideo> {
         const endpoint = validateUrl(this.settings.endpoint);
-        const base = endpoint.toString().replace(/\/$/, '');
+        const generationUrl = resolveGenerationUrl(endpoint);
         const controller = new AbortController();
         const timeoutId = setTimeout(
             () => controller.abort(),
@@ -134,7 +142,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
         );
 
         try {
-            const response = await this.fetchFn(`${base}/videos/generations`, {
+            const response = await this.fetchFn(generationUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -152,7 +160,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
 
             if (!response.ok) throw requestError(response.status);
             const data = await this.readJson(response);
-            return await this.resolveResult(base, data, controller.signal);
+            return await this.resolveResult(generationUrl, data, controller.signal);
         } catch (error) {
             if (error instanceof VideoProviderError) throw error;
             if (error instanceof Error && error.name === 'AbortError') {
@@ -165,7 +173,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
     }
 
     private async resolveResult(
-        base: string,
+        generationUrl: string,
         data: any,
         signal: AbortSignal
     ): Promise<GeneratedVideo> {
@@ -181,7 +189,7 @@ export class OpenAICompatibleVideoProvider implements VideoProvider {
         for (let attempt = 0; attempt < this.settings.maxPollAttempts; attempt++) {
             if (attempt > 0) await this.sleep(this.settings.pollInterval * 1000);
             const response = await this.fetchFn(
-                `${base}/videos/generations/${encodeURIComponent(taskId)}`,
+                `${generationUrl}/${encodeURIComponent(taskId)}`,
                 {
                     headers: { 'Authorization': `Bearer ${this.settings.apiKey}` },
                     signal
